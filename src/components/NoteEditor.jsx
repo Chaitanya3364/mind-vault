@@ -247,8 +247,8 @@ export function NoteEditor({
 
   const getDisplayColor = useCallback(
     (color) => {
-      if (isDark && color.toLowerCase() === '#0f172a') return '#f8fafc';
-      return color;
+      if (isDark && color?.toLowerCase() === '#0f172a') return '#f8fafc';
+      return color || '#0f172a';
     },
     [isDark]
   );
@@ -415,16 +415,30 @@ export function NoteEditor({
     };
 
     const handleWindowPointerUp = () => {
+      // Pointer moves are applied without history for smooth dragging. Commit one
+      // undo snapshot when the gesture ends so a whole drag is one undo action.
+      onUpdate(
+        { ...notebook, textBoxes, content: '' },
+        true,
+        {
+          strokes,
+          textBoxes: draggingBox.snapshotBoxes,
+          images,
+          content: notebook.content || '',
+        }
+      );
       setDraggingBox(null);
     };
 
     window.addEventListener('pointermove', handleWindowPointerMove);
     window.addEventListener('pointerup', handleWindowPointerUp);
+    window.addEventListener('pointercancel', handleWindowPointerUp);
     return () => {
       window.removeEventListener('pointermove', handleWindowPointerMove);
       window.removeEventListener('pointerup', handleWindowPointerUp);
+      window.removeEventListener('pointercancel', handleWindowPointerUp);
     };
-  }, [draggingBox, textBoxes, notebook, onUpdate]);
+  }, [draggingBox, textBoxes, strokes, images, notebook, onUpdate]);
 
   // Dragging Images (clamped inside visible viewport)
   useEffect(() => {
@@ -614,6 +628,7 @@ export function NoteEditor({
       id: box.id,
       offsetX: pointerX - box.x,
       offsetY: pointerY - box.y,
+      snapshotBoxes: textBoxes.map((item) => ({ ...item })),
     });
     setActiveBoxId(box.id);
   };
