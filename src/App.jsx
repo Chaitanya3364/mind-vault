@@ -157,8 +157,6 @@ export default function App() {
   const exportMenuRef = useRef(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  const foldersRef = useRef(folders);
-  foldersRef.current = folders;
 
   const handleThemeChange = (newTheme) => {
     setTheme(newTheme);
@@ -243,26 +241,30 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
+  // Debounced autosave: persist shortly after edits instead of waiting up to a minute.
   useEffect(() => {
     if (!isLoaded) return;
-    const saveLatestWorkspace = async () => {
+    const timer = setTimeout(async () => {
       try {
-        await saveWorkspace(foldersRef.current);
+        await saveWorkspace(folders);
       } catch (error) {
         console.error('MindVault autosave failed:', error);
       }
-    };
-    const timer = setInterval(saveLatestWorkspace, 60000);
-    return () => clearInterval(timer);
-  }, [isLoaded]);
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [folders, isLoaded]);
 
   const handleManualSave = async () => {
-    await saveWorkspace(folders);
-    setJustSaved(true);
-    setTimeout(() => {
-      setJustSaved(false);
-      setIsExportMenuOpen(false);
-    }, 800);
+    try {
+      await saveWorkspace(folders);
+      setJustSaved(true);
+      setTimeout(() => {
+        setJustSaved(false);
+        setIsExportMenuOpen(false);
+      }, 800);
+    } catch (error) {
+      console.error('MindVault manual save failed:', error);
+    }
   };
 
   const handleToggleFolder = (folderId) => {
