@@ -26,6 +26,7 @@ const TAG_COLORS = [
 export function Sidebar({
   isOpen,
   width,
+  theme = 'light',
   onStartResize,
   onClose,
   folders,
@@ -54,6 +55,8 @@ export function Sidebar({
   const [colorPickerId, setColorPickerId] = useState(null);
 
   if (!isOpen) return null;
+
+  const isDark = theme === 'dark';
 
   const submitNewFolder = (e) => {
     e.preventDefault();
@@ -116,16 +119,28 @@ export function Sidebar({
       {/* Mobile Backdrop Overlay */}
       <div
         onClick={onClose}
-        className="fixed inset-0 bg-black/50 backdrop-blur-[1px] z-40 md:hidden"
+        className="fixed inset-0 bg-black/40 backdrop-blur-[1px] z-40 md:hidden"
       />
 
       <aside
         style={{ width: `${width}px` }}
-        className="fixed md:relative inset-y-0 left-0 z-50 md:z-auto max-w-[85vw] bg-slate-900 text-slate-100 flex flex-col border-r border-slate-800 h-full select-none shrink-0 shadow-2xl md:shadow-none"
+        className={`fixed md:relative inset-y-0 left-0 z-50 md:z-auto max-w-[85vw] flex flex-col border-r h-full select-none shrink-0 shadow-2xl md:shadow-none transition-colors duration-200 ${
+          isDark
+            ? 'bg-slate-900 text-slate-100 border-slate-800'
+            : 'bg-slate-50 text-slate-800 border-slate-200'
+        }`}
       >
         {/* Sidebar Header */}
-        <div className="p-3.5 sm:p-4 flex items-center justify-between border-b border-slate-800">
-          <span className="font-bold tracking-wide truncate text-indigo-400">
+        <div
+          className={`p-3.5 sm:p-4 flex items-center justify-between border-b transition-colors duration-200 ${
+            isDark ? 'border-slate-800' : 'border-slate-200'
+          }`}
+        >
+          <span
+            className={`font-bold tracking-wide truncate ${
+              isDark ? 'text-indigo-400' : 'text-indigo-600'
+            }`}
+          >
             MindVault
           </span>
           <div className="flex gap-1 shrink-0">
@@ -136,7 +151,11 @@ export function Sidebar({
                 setNewFolderName('');
               }}
               title="New Folder"
-              className="p-2 md:p-1.5 hover:bg-slate-800 rounded text-slate-300 hover:text-white"
+              className={`p-2 md:p-1.5 rounded transition-colors ${
+                isDark
+                  ? 'hover:bg-slate-800 text-slate-300 hover:text-white'
+                  : 'hover:bg-slate-200/70 text-slate-600 hover:text-slate-900'
+              }`}
             >
               <FolderPlus size={18} />
             </button>
@@ -144,7 +163,11 @@ export function Sidebar({
               type="button"
               onClick={onClose}
               title="Close Library"
-              className="p-2 md:p-1.5 hover:bg-slate-800 rounded text-slate-300 hover:text-white"
+              className={`p-2 md:p-1.5 rounded transition-colors ${
+                isDark
+                  ? 'hover:bg-slate-800 text-slate-300 hover:text-white'
+                  : 'hover:bg-slate-200/70 text-slate-600 hover:text-slate-900'
+              }`}
             >
               <PanelLeftClose size={18} />
             </button>
@@ -153,7 +176,14 @@ export function Sidebar({
 
         {/* Inline New Folder Input */}
         {isAddingFolder && (
-          <form onSubmit={submitNewFolder} className="p-2 border-b border-slate-800 bg-slate-800/50">
+          <form
+            onSubmit={submitNewFolder}
+            className={`p-2 border-b transition-colors ${
+              isDark
+                ? 'border-slate-800 bg-slate-800/50'
+                : 'border-slate-200 bg-slate-100'
+            }`}
+          >
             <div className="flex items-center gap-1">
               <input
                 type="text"
@@ -161,7 +191,11 @@ export function Sidebar({
                 value={newFolderName}
                 onChange={(e) => setNewFolderName(e.target.value)}
                 placeholder="Folder name..."
-                className="w-full bg-slate-950 text-white text-sm px-2.5 py-1.5 rounded border border-indigo-500 focus:outline-none"
+                className={`w-full text-sm px-2.5 py-1.5 rounded border border-indigo-500 focus:outline-none ${
+                  isDark
+                    ? 'bg-slate-950 text-white'
+                    : 'bg-white text-slate-900'
+                }`}
               />
               <button
                 type="submit"
@@ -173,7 +207,11 @@ export function Sidebar({
               <button
                 type="button"
                 onClick={() => setIsAddingFolder(false)}
-                className="p-1.5 hover:bg-slate-700 text-slate-400 rounded"
+                className={`p-1.5 rounded ${
+                  isDark
+                    ? 'hover:bg-slate-700 text-slate-400'
+                    : 'hover:bg-slate-200 text-slate-500'
+                }`}
                 title="Cancel"
               >
                 <X size={14} />
@@ -200,7 +238,11 @@ export function Sidebar({
                       value={editValue}
                       onChange={(e) => setEditValue(e.target.value)}
                       onKeyDown={(e) => e.key === 'Escape' && setEditingId(null)}
-                      className="w-full bg-slate-950 text-white text-sm px-2 py-1 rounded border border-indigo-500 focus:outline-none"
+                      className={`w-full text-sm px-2 py-1 rounded border border-indigo-500 focus:outline-none ${
+                        isDark
+                          ? 'bg-slate-950 text-white'
+                          : 'bg-white text-slate-900'
+                      }`}
                     />
                     <button
                       type="submit"
@@ -212,19 +254,31 @@ export function Sidebar({
                     <button
                       type="button"
                       onClick={() => setEditingId(null)}
-                      className="p-1 hover:bg-slate-700 text-slate-400 rounded"
+                      className={`p-1 rounded ${
+                        isDark
+                          ? 'hover:bg-slate-700 text-slate-400'
+                          : 'hover:bg-slate-200 text-slate-500'
+                      }`}
                       title="Cancel"
                     >
                       <X size={13} />
                     </button>
                   </form>
                 ) : (
-                  <div className="flex items-center justify-between px-2 py-2 md:py-1.5 rounded hover:bg-slate-800 group">
+                  <div
+                    className={`flex items-center justify-between px-2 py-2 md:py-1.5 rounded group transition-colors ${
+                      isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200/60'
+                    }`}
+                  >
                     <div className="flex items-center gap-1.5 flex-1 min-w-0">
                       <button
                         type="button"
                         onClick={() => onToggleFolder(folder.id)}
-                        className="text-slate-400 hover:text-white shrink-0 p-0.5"
+                        className={`shrink-0 p-0.5 ${
+                          isDark
+                            ? 'text-slate-400 hover:text-white'
+                            : 'text-slate-500 hover:text-slate-900'
+                        }`}
                       >
                         {folder.isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
                       </button>
@@ -233,7 +287,9 @@ export function Sidebar({
                         type="button"
                         onClick={(e) => toggleColorPicker(e, folder.id)}
                         title="Change folder color"
-                        className="p-0.5 rounded hover:bg-slate-700 shrink-0 transition-transform hover:scale-110"
+                        className={`p-0.5 rounded shrink-0 transition-transform hover:scale-110 ${
+                          isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-200'
+                        }`}
                       >
                         <Folder
                           size={15}
@@ -253,8 +309,14 @@ export function Sidebar({
                     </div>
 
                     {confirmDeleteId === folder.id ? (
-                      <div className="flex items-center gap-1 shrink-0 bg-red-950/80 px-1.5 py-0.5 rounded border border-red-800">
-                        <span className="text-[11px] text-red-200">Delete?</span>
+                      <div
+                        className={`flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded border ${
+                          isDark
+                            ? 'bg-red-950/80 border-red-800 text-red-200'
+                            : 'bg-red-50 border-red-200 text-red-700'
+                        }`}
+                      >
+                        <span className="text-[11px]">Delete?</span>
                         <button
                           type="button"
                           onClick={(e) => {
@@ -274,7 +336,11 @@ export function Sidebar({
                             setConfirmDeleteId(null);
                           }}
                           title="Cancel"
-                          className="p-0.5 hover:bg-slate-700 text-slate-300 rounded"
+                          className={`p-0.5 rounded ${
+                            isDark
+                              ? 'hover:bg-slate-700 text-slate-300'
+                              : 'hover:bg-slate-200 text-slate-600'
+                          }`}
                         >
                           <X size={12} />
                         </button>
@@ -285,7 +351,11 @@ export function Sidebar({
                           type="button"
                           onClick={(e) => startEditing(e, folder.id, folder.name)}
                           title="Rename Folder"
-                          className="md:opacity-0 md:group-hover:opacity-100 p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white"
+                          className={`md:opacity-0 md:group-hover:opacity-100 p-1 rounded ${
+                            isDark
+                              ? 'hover:bg-slate-700 text-slate-400 hover:text-white'
+                              : 'hover:bg-slate-200 text-slate-500 hover:text-slate-900'
+                          }`}
                         >
                           <Pencil size={13} />
                         </button>
@@ -298,7 +368,11 @@ export function Sidebar({
                             setNewNotebookTitle('');
                           }}
                           title="Add Notebook"
-                          className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white"
+                          className={`p-1 rounded ${
+                            isDark
+                              ? 'hover:bg-slate-700 text-slate-400 hover:text-white'
+                              : 'hover:bg-slate-200 text-slate-500 hover:text-slate-900'
+                          }`}
                         >
                           <FilePlus size={15} />
                         </button>
@@ -309,7 +383,11 @@ export function Sidebar({
                             setConfirmDeleteId(folder.id);
                           }}
                           title="Delete Folder"
-                          className="md:opacity-0 md:group-hover:opacity-100 p-1 hover:bg-red-900/60 rounded text-slate-400 hover:text-red-400"
+                          className={`md:opacity-0 md:group-hover:opacity-100 p-1 rounded ${
+                            isDark
+                              ? 'hover:bg-red-900/60 text-slate-400 hover:text-red-400'
+                              : 'hover:bg-red-100 text-slate-500 hover:text-red-600'
+                          }`}
                         >
                           <Trash2 size={13} />
                         </button>
@@ -319,7 +397,13 @@ export function Sidebar({
                 )}
 
                 {colorPickerId === folder.id && (
-                  <div className="mx-2 my-1 p-2 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between gap-1">
+                  <div
+                    className={`mx-2 my-1 p-2 rounded-lg border flex items-center justify-between gap-1 ${
+                      isDark
+                        ? 'bg-slate-950 border-slate-800'
+                        : 'bg-white border-slate-200 shadow-sm'
+                    }`}
+                  >
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {TAG_COLORS.map((c) => (
                         <button
@@ -331,7 +415,9 @@ export function Sidebar({
                           }}
                           style={{ backgroundColor: c }}
                           className={`w-4 h-4 rounded-full transition-transform ${
-                            folderColor === c ? 'scale-125 ring-2 ring-white' : 'hover:scale-110'
+                            folderColor === c
+                              ? `scale-125 ring-2 ${isDark ? 'ring-white' : 'ring-slate-800'}`
+                              : 'hover:scale-110'
                           }`}
                         />
                       ))}
@@ -354,7 +440,9 @@ export function Sidebar({
                     <button
                       type="button"
                       onClick={() => setColorPickerId(null)}
-                      className="text-slate-400 hover:text-white p-0.5"
+                      className={`p-0.5 ${
+                        isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'
+                      }`}
                     >
                       <X size={12} />
                     </button>
@@ -362,7 +450,11 @@ export function Sidebar({
                 )}
 
                 {folder.isOpen && (
-                  <div className="ml-4 sm:ml-5 mt-1 space-y-0.5 border-l border-slate-700 pl-2">
+                  <div
+                    className={`ml-4 sm:ml-5 mt-1 space-y-0.5 border-l pl-2 ${
+                      isDark ? 'border-slate-700' : 'border-slate-300'
+                    }`}
+                  >
                     {folder.notebooks.map((nb) => {
                       const noteColor = nb.color || '#38bdf8';
 
@@ -378,7 +470,11 @@ export function Sidebar({
                             value={editValue}
                             onChange={(e) => setEditValue(e.target.value)}
                             onKeyDown={(e) => e.key === 'Escape' && setEditingId(null)}
-                            className="w-full bg-slate-950 text-white text-xs px-2 py-1 rounded border border-indigo-500 focus:outline-none"
+                            className={`w-full text-xs px-2 py-1 rounded border border-indigo-500 focus:outline-none ${
+                              isDark
+                                ? 'bg-slate-950 text-white'
+                                : 'bg-white text-slate-900'
+                            }`}
                           />
                           <button
                             type="submit"
@@ -390,7 +486,11 @@ export function Sidebar({
                           <button
                             type="button"
                             onClick={() => setEditingId(null)}
-                            className="p-1 hover:bg-slate-700 text-slate-400 rounded"
+                            className={`p-1 rounded ${
+                              isDark
+                                ? 'hover:bg-slate-700 text-slate-400'
+                                : 'hover:bg-slate-200 text-slate-500'
+                            }`}
                             title="Cancel"
                           >
                             <X size={12} />
@@ -399,10 +499,12 @@ export function Sidebar({
                       ) : (
                         <div key={nb.id}>
                           <div
-                            className={`flex items-center justify-between rounded group ${
+                            className={`flex items-center justify-between rounded group transition-colors ${
                               activeId === nb.id
                                 ? 'bg-indigo-600 text-white'
-                                : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                                : isDark
+                                ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                                : 'text-slate-600 hover:bg-slate-200/70 hover:text-slate-900'
                             }`}
                           >
                             <div className="flex items-center flex-1 min-w-0 pl-2">
@@ -410,11 +512,11 @@ export function Sidebar({
                                 type="button"
                                 onClick={(e) => toggleColorPicker(e, nb.id)}
                                 title="Change note color"
-                                className="p-1 rounded hover:bg-black/20 shrink-0"
+                                className="p-1 rounded hover:bg-black/15 shrink-0"
                               >
                                 <span
                                   style={{ backgroundColor: noteColor }}
-                                  className="block w-2.5 h-2.5 rounded-full ring-1 ring-white/40 transition-transform hover:scale-125"
+                                  className="block w-2.5 h-2.5 rounded-full ring-1 ring-black/20 transition-transform hover:scale-125"
                                 />
                               </button>
 
@@ -430,7 +532,13 @@ export function Sidebar({
                             </div>
 
                             {confirmDeleteId === nb.id ? (
-                              <div className="flex items-center gap-1 mr-1 shrink-0 bg-red-950/90 px-1 py-0.5 rounded border border-red-800">
+                              <div
+                                className={`flex items-center gap-1 mr-1 shrink-0 px-1 py-0.5 rounded border ${
+                                  isDark
+                                    ? 'bg-red-950/90 border-red-800'
+                                    : 'bg-red-50 border-red-200'
+                                }`}
+                              >
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -450,7 +558,11 @@ export function Sidebar({
                                     setConfirmDeleteId(null);
                                   }}
                                   title="Cancel"
-                                  className="p-0.5 hover:bg-slate-700 text-slate-300 rounded"
+                                  className={`p-0.5 rounded ${
+                                    isDark
+                                      ? 'hover:bg-slate-700 text-slate-300'
+                                      : 'hover:bg-slate-200 text-slate-600'
+                                  }`}
                                 >
                                   <X size={11} />
                                 </button>
@@ -464,7 +576,9 @@ export function Sidebar({
                                   className={`md:opacity-0 md:group-hover:opacity-100 p-1 rounded ${
                                     activeId === nb.id
                                       ? 'hover:bg-indigo-500 text-indigo-100'
-                                      : 'hover:bg-slate-700 text-slate-400 hover:text-white'
+                                      : isDark
+                                      ? 'hover:bg-slate-700 text-slate-400 hover:text-white'
+                                      : 'hover:bg-slate-200 text-slate-500 hover:text-slate-900'
                                   }`}
                                 >
                                   <Pencil size={12} />
@@ -479,7 +593,9 @@ export function Sidebar({
                                   className={`md:opacity-0 md:group-hover:opacity-100 p-1 rounded ${
                                     activeId === nb.id
                                       ? 'hover:bg-red-500 text-indigo-100 hover:text-white'
-                                      : 'hover:bg-red-900/60 text-slate-400 hover:text-red-400'
+                                      : isDark
+                                      ? 'hover:bg-red-900/60 text-slate-400 hover:text-red-400'
+                                      : 'hover:bg-red-100 text-slate-500 hover:text-red-600'
                                   }`}
                                 >
                                   <Trash2 size={12} />
@@ -489,7 +605,13 @@ export function Sidebar({
                           </div>
 
                           {colorPickerId === nb.id && (
-                            <div className="my-1 p-1.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between gap-1">
+                            <div
+                              className={`my-1 p-1.5 rounded-lg border flex items-center justify-between gap-1 ${
+                                isDark
+                                  ? 'bg-slate-950 border-slate-800'
+                                  : 'bg-white border-slate-200 shadow-sm'
+                              }`}
+                            >
                               <div className="flex items-center gap-1 flex-wrap">
                                 {TAG_COLORS.map((c) => (
                                   <button
@@ -501,7 +623,9 @@ export function Sidebar({
                                     }}
                                     style={{ backgroundColor: c }}
                                     className={`w-3.5 h-3.5 rounded-full transition-transform ${
-                                      noteColor === c ? 'scale-125 ring-2 ring-white' : 'hover:scale-110'
+                                      noteColor === c
+                                        ? `scale-125 ring-2 ${isDark ? 'ring-white' : 'ring-slate-800'}`
+                                        : 'hover:scale-110'
                                     }`}
                                   />
                                 ))}
@@ -526,7 +650,11 @@ export function Sidebar({
                               <button
                                 type="button"
                                 onClick={() => setColorPickerId(null)}
-                                className="text-slate-400 hover:text-white p-0.5"
+                                className={`p-0.5 ${
+                                  isDark
+                                    ? 'text-slate-400 hover:text-white'
+                                    : 'text-slate-500 hover:text-slate-900'
+                                }`}
                               >
                                 <X size={11} />
                               </button>
@@ -547,7 +675,11 @@ export function Sidebar({
                           value={newNotebookTitle}
                           onChange={(e) => setNewNotebookTitle(e.target.value)}
                           placeholder="Notebook title..."
-                          className="w-full bg-slate-950 text-white text-xs px-2 py-1.5 rounded border border-indigo-500 focus:outline-none"
+                          className={`w-full text-xs px-2 py-1.5 rounded border border-indigo-500 focus:outline-none ${
+                            isDark
+                              ? 'bg-slate-950 text-white'
+                              : 'bg-white text-slate-900'
+                          }`}
                         />
                         <button
                           type="submit"
@@ -559,7 +691,11 @@ export function Sidebar({
                         <button
                           type="button"
                           onClick={() => setAddingNotebookFolderId(null)}
-                          className="p-1 hover:bg-slate-700 text-slate-400 rounded"
+                          className={`p-1 rounded ${
+                            isDark
+                              ? 'hover:bg-slate-700 text-slate-400'
+                              : 'hover:bg-slate-200 text-slate-500'
+                          }`}
                           title="Cancel"
                         >
                           <X size={13} />

@@ -3,6 +3,7 @@ import {
   PanelLeftOpen,
   Type,
   PenTool,
+  Highlighter,
   MousePointer2,
   Save,
   Undo2,
@@ -11,7 +12,6 @@ import {
   Download,
   Sun,
   Moon,
-  BookOpen,
   Eraser,
   ChevronDown,
   FileImage,
@@ -51,10 +51,12 @@ const DEFAULT_FOLDERS = [
 ];
 
 const DEFAULT_RECENT_COLORS = ['#0f172a', '#2563eb', '#dc2626', '#16a34a'];
+const HIGHLIGHTER_COLORS = ['#fde047', '#4ade80', '#38bdf8', '#f472b6', '#fb923c'];
 
 const DRAW_TOOLS = [
-  { id: 'pen', label: 'Freehand Pen (W)', icon: PenTool },
-  { id: 'eraser', label: 'Rubber Eraser (E)', icon: Eraser },
+  { id: 'pen', label: 'Freehand Pen (⌘/Ctrl + Shift + F)', icon: PenTool },
+  { id: 'highlighter', label: 'Highlighter (⌘/Ctrl + H)', icon: Highlighter },
+  { id: 'eraser', label: 'Rubber Eraser (⌘/Ctrl + E)', icon: Eraser },
   { id: 'line', label: 'Straight Line', icon: Minus },
   { id: 'square', label: 'Square', icon: Square },
   { id: 'rect', label: 'Rectangle', icon: RectangleHorizontal },
@@ -67,25 +69,27 @@ export default function App() {
   const [activeFolderId, setActiveFolderId] = useState('folder-1');
   const [activeNotebookId, setActiveNotebookId] = useState('nb-1');
 
-  // Default sidebar open on tablet/desktop (>= 768px), closed drawer on phones
   const [isSidebarOpen, setIsSidebarOpen] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth >= 768 : true
   );
 
-  // Theme state ('light' | 'sepia' | 'dark')
-  const [theme, setTheme] = useState(
-    () => localStorage.getItem('mindvault-theme') || 'light'
-  );
+  // Single-source-of-truth Light / Dark theme ('light' | 'dark')
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('mindvault-theme');
+    return saved === 'dark' ? 'dark' : 'light';
+  });
 
   // Resizable Sidebar state
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const isResizingRef = useRef(false);
 
-  // Editor, Draw Tool, Pen & Eraser state
-  const [mode, setMode] = useState('type'); // 'type' | 'draw' | 'select'
+  // Editor, Draw Tool, Pen, Highlighter & Eraser state
+  const [mode, setMode] = useState('type');
   const [drawTool, setDrawTool] = useState('pen');
   const [penColor, setPenColor] = useState('#0f172a');
   const [penSize, setPenSize] = useState(3);
+  const [highlighterColor, setHighlighterColor] = useState('#fde047');
+  const [highlighterSize, setHighlighterSize] = useState(22);
   const [eraserSize, setEraserSize] = useState(24);
   const [confirmClearPage, setConfirmClearPage] = useState(false);
   const [recentColors, setRecentColors] = useState(() => {
@@ -113,9 +117,11 @@ export default function App() {
   const handleThemeChange = (newTheme) => {
     setTheme(newTheme);
     localStorage.setItem('mindvault-theme', newTheme);
+    localStorage.removeItem('mindvault-theme-level');
   };
 
   const recordRecentColor = (color) => {
+    if (!color) return;
     const normalized = color.toLowerCase();
     setRecentColors((prev) => {
       const filtered = prev.filter((c) => c.toLowerCase() !== normalized);
@@ -443,25 +449,37 @@ export default function App() {
     setConfirmClearPage(false);
   };
 
+  // Global Keyboard Shortcuts:
+  // Cmd/Ctrl + Shift + F = Pen
+  // Cmd/Ctrl + H = Highlighter, E = Eraser, R = Color Picker, S = Selection, T = Typing, Z = Undo, X = Redo
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const isMod = e.metaKey || e.ctrlKey;
+      if (!isMod || e.altKey) return;
 
       const activeTag = document.activeElement?.tagName;
-      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') {
-        if (e.key === 'Escape') {
-          document.activeElement.blur();
-        }
+      if (activeTag === 'INPUT') {
+        if (e.key === 'Escape') document.activeElement.blur();
         return;
       }
 
       if (!activeNotebook) return;
 
       const key = e.key.toLowerCase();
-      if (key === 'w') {
+
+      if (key === 'f' && e.shiftKey) {
         e.preventDefault();
         setMode('draw');
         setDrawTool('pen');
+        return;
+      }
+
+      if (e.shiftKey) return;
+
+      if (key === 'h') {
+        e.preventDefault();
+        setMode('draw');
+        setDrawTool('highlighter');
       } else if (key === 'e') {
         e.preventDefault();
         setMode('draw');
@@ -491,12 +509,6 @@ export default function App() {
   }, [activeNotebook, drawTool, handleUndo, handleRedo]);
 
   const isDark = theme === 'dark';
-  const headerStyles =
-    theme === 'dark'
-      ? 'bg-slate-950 border-slate-800 text-slate-100'
-      : theme === 'sepia'
-      ? 'bg-[#f3ead8] border-[#e2d4b7] text-[#3d3122]'
-      : 'bg-white border-slate-200 text-slate-900';
 
   const getDisplaySwatch = (color) =>
     isDark && color.toLowerCase() === '#0f172a' ? '#f8fafc' : color;
@@ -504,12 +516,21 @@ export default function App() {
   const canUndo = (activeNotebook?.history?.length || 0) > 0;
   const canRedo = (activeNotebook?.redoStack?.length || 0) > 0;
 
+  const activeColorValue = drawTool === 'highlighter' ? highlighterColor : penColor;
+  const setActiveColorValue =
+    drawTool === 'highlighter' ? setHighlighterColor : setPenColor;
+
   return (
-    <div className="flex h-dvh w-screen overflow-hidden bg-slate-100 text-slate-900">
-      {/* Responsive Sidebar (Drawer on mobile, resizable pane on tablet/desktop) */}
+    <div
+      className={`flex h-dvh w-screen overflow-hidden transition-colors duration-200 ${
+        isDark ? 'bg-slate-900 text-slate-100' : 'bg-white text-slate-900'
+      }`}
+    >
+      {/* Responsive Theme-Synced Sidebar */}
       <Sidebar
         isOpen={isSidebarOpen}
         width={sidebarWidth}
+        theme={theme}
         onStartResize={startResizingSidebar}
         onClose={() => setIsSidebarOpen(false)}
         folders={folders}
@@ -528,9 +549,13 @@ export default function App() {
 
       {/* Main Workspace */}
       <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
-        {/* Responsive Multi-Row Toolbar */}
+        {/* Top Toolbar */}
         <header
-          className={`relative z-30 min-h-[3.5rem] border-b px-2.5 sm:px-4 py-1.5 flex flex-wrap items-center justify-between gap-2 shrink-0 transition-colors duration-200 ${headerStyles}`}
+          className={`relative z-30 min-h-[3.5rem] border-b px-2.5 sm:px-4 py-1.5 flex flex-wrap items-center justify-between gap-2 shrink-0 transition-colors duration-200 ${
+            isDark
+              ? 'bg-slate-950 border-slate-800 text-slate-100'
+              : 'bg-white border-slate-200 text-slate-900'
+          }`}
         >
           {/* Row 1 Left: Sidebar Toggle, Color Tag & Editable Active Title */}
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 max-w-[180px] sm:max-w-[230px]">
@@ -538,8 +563,8 @@ export default function App() {
               <button
                 onClick={() => setIsSidebarOpen(true)}
                 title="Open MindVault Library"
-                className={`p-2 rounded-lg shrink-0 ${
-                  isDark ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-black/5 text-slate-700'
+                className={`p-2 rounded-lg shrink-0 transition-colors duration-200 ${
+                  isDark ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-700'
                 }`}
               >
                 <PanelLeftOpen size={19} />
@@ -575,10 +600,10 @@ export default function App() {
                     })
                   }
                   title="Click to edit notebook title"
-                  className={`font-semibold text-sm sm:text-base bg-transparent px-1.5 py-1 rounded border border-transparent focus:border-indigo-500 focus:outline-none truncate w-full ${
+                  className={`font-semibold text-sm sm:text-base bg-transparent px-1.5 py-1 rounded border border-transparent focus:border-indigo-500 focus:outline-none truncate w-full transition-colors duration-200 ${
                     isDark
                       ? 'text-slate-100 hover:bg-slate-800 focus:bg-slate-900'
-                      : 'text-slate-800 hover:bg-black/5 focus:bg-white'
+                      : 'text-slate-800 hover:bg-slate-100 focus:bg-white'
                   }`}
                 />
               </div>
@@ -589,47 +614,35 @@ export default function App() {
             )}
           </div>
 
-          {/* Row 1 Right (on mobile) / Row End (on desktop): Theme, Clear & Export */}
+          {/* Row 1 Right: Light / Dark Buttons, Clear & Export */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 order-2 lg:order-3">
+            {/* Light & Dark Theme Buttons */}
             <div
-              className={`flex items-center p-0.5 sm:p-1 rounded-lg border ${
+              className={`flex items-center p-0.5 sm:p-1 rounded-lg border transition-colors duration-200 ${
                 isDark
                   ? 'bg-slate-900 border-slate-800'
-                  : 'bg-black/5 border-black/10'
+                  : 'bg-slate-100 border-slate-200'
               }`}
               title="Switch Theme"
             >
               <button
+                type="button"
                 onClick={() => handleThemeChange('light')}
                 title="Light Theme"
-                className={`p-1.5 rounded-md transition ${
-                  theme === 'light'
+                className={`p-1.5 rounded-md transition-colors duration-200 ${
+                  !isDark
                     ? 'bg-white text-amber-500 shadow-sm'
-                    : isDark
-                    ? 'text-slate-400 hover:text-slate-200'
-                    : 'text-slate-600 hover:text-slate-900'
+                    : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 <Sun size={14} />
               </button>
               <button
-                onClick={() => handleThemeChange('sepia')}
-                title="Sepia Paper Theme"
-                className={`p-1.5 rounded-md transition ${
-                  theme === 'sepia'
-                    ? 'bg-[#fbf5e9] text-amber-800 shadow-sm'
-                    : isDark
-                    ? 'text-slate-400 hover:text-slate-200'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <BookOpen size={14} />
-              </button>
-              <button
+                type="button"
                 onClick={() => handleThemeChange('dark')}
                 title="Dark Theme"
-                className={`p-1.5 rounded-md transition ${
-                  theme === 'dark'
+                className={`p-1.5 rounded-md transition-colors duration-200 ${
+                  isDark
                     ? 'bg-slate-800 text-indigo-400 shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
@@ -661,10 +674,10 @@ export default function App() {
                   <button
                     onClick={() => setConfirmClearPage(true)}
                     title="Clear entire page (text and ink)"
-                    className={`flex items-center gap-1 p-2 sm:px-2.5 sm:py-1.5 text-sm font-medium rounded-lg border transition ${
+                    className={`flex items-center gap-1 p-2 sm:px-2.5 sm:py-1.5 text-sm font-medium rounded-lg border transition-colors duration-200 ${
                       isDark
-                        ? 'bg-slate-900 hover:bg-red-950/60 text-red-400 border-slate-700 hover:border-red-800'
-                        : 'bg-black/5 hover:bg-red-50 text-red-600 border-black/10 hover:border-red-200'
+                        ? 'bg-slate-900 hover:bg-red-950/60 text-red-400 border-slate-800 hover:border-red-800'
+                        : 'bg-slate-100 hover:bg-red-50 text-red-600 border-slate-200 hover:border-red-200'
                     }`}
                   >
                     <Trash2 size={14} />
@@ -692,7 +705,7 @@ export default function App() {
 
               {isExportMenuOpen && (
                 <div
-                  className={`absolute right-0 mt-2 w-48 rounded-xl shadow-lg border py-1.5 z-50 ${
+                  className={`absolute right-0 mt-2 w-48 rounded-xl shadow-lg border py-1.5 z-50 transition-colors duration-200 ${
                     isDark
                       ? 'bg-slate-900 border-slate-800 text-slate-200'
                       : 'bg-white border-slate-200 text-slate-700'
@@ -700,7 +713,7 @@ export default function App() {
                 >
                   <button
                     onClick={handleManualSave}
-                    className={`w-full flex items-center justify-between px-3.5 py-2 text-sm transition ${
+                    className={`w-full flex items-center justify-between px-3.5 py-2 text-sm transition-colors ${
                       isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
                     }`}
                   >
@@ -726,7 +739,7 @@ export default function App() {
                           exportAsPNG(activeNotebook, theme);
                           setIsExportMenuOpen(false);
                         }}
-                        className={`w-full flex items-center gap-2 px-3.5 py-2 text-sm transition ${
+                        className={`w-full flex items-center gap-2 px-3.5 py-2 text-sm transition-colors ${
                           isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
                         }`}
                       >
@@ -739,7 +752,7 @@ export default function App() {
                           exportAsPDF(activeNotebook, theme);
                           setIsExportMenuOpen(false);
                         }}
-                        className={`w-full flex items-center gap-2 px-3.5 py-2 text-sm transition ${
+                        className={`w-full flex items-center gap-2 px-3.5 py-2 text-sm transition-colors ${
                           isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
                         }`}
                       >
@@ -753,105 +766,89 @@ export default function App() {
             </div>
           </div>
 
-          {/* Center / Row 2 on Mobile & Tablet: Mode Switcher, Draw Tools, Undo/Redo */}
+          {/* Center / Row 2: Mode Switcher, Draw Tools, Undo/Redo */}
           {activeNotebook && (
-            <div className="w-full lg:w-auto order-3 lg:order-2 flex flex-wrap items-center justify-center gap-2 pt-1 lg:pt-0 border-t lg:border-t-0 border-black/5 dark:border-white/5">
-              {/* Type (T) | Draw (W) | Select (S) */}
+            <div
+              className={`w-full lg:w-auto order-3 lg:order-2 flex flex-wrap items-center justify-center gap-2 pt-1 lg:pt-0 border-t lg:border-t-0 transition-colors duration-200 ${
+                isDark ? 'border-slate-800' : 'border-slate-200'
+              }`}
+            >
+              {/* Type | Draw | Select Pill */}
               <div
-                className={`flex p-0.5 sm:p-1 rounded-lg border ${
+                className={`flex p-0.5 sm:p-1 rounded-lg border transition-colors duration-200 ${
                   isDark
                     ? 'bg-slate-900 border-slate-800'
-                    : 'bg-black/5 border-black/10'
+                    : 'bg-slate-100 border-slate-200'
                 }`}
               >
-                <button
-                  onClick={() => setMode('type')}
-                  title="Type Anywhere (T)"
-                  className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-md text-xs sm:text-sm font-medium transition ${
-                    mode === 'type'
-                      ? isDark
-                        ? 'bg-slate-800 text-indigo-400 shadow-sm'
-                        : 'bg-white text-indigo-600 shadow-sm'
-                      : isDark
-                      ? 'text-slate-400 hover:text-slate-200'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Type size={14} />
-                  <span>Type</span>
-                </button>
-                <button
-                  onClick={() => setMode('draw')}
-                  title="Draw & Shapes (W)"
-                  className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-md text-xs sm:text-sm font-medium transition ${
-                    mode === 'draw'
-                      ? isDark
-                        ? 'bg-slate-800 text-indigo-400 shadow-sm'
-                        : 'bg-white text-indigo-600 shadow-sm'
-                      : isDark
-                      ? 'text-slate-400 hover:text-slate-200'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <PenTool size={14} />
-                  <span>Draw</span>
-                </button>
-                <button
-                  onClick={() => setMode('select')}
-                  title="Select & Move Items (S)"
-                  className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-md text-xs sm:text-sm font-medium transition ${
-                    mode === 'select'
-                      ? isDark
-                        ? 'bg-slate-800 text-indigo-400 shadow-sm'
-                        : 'bg-white text-indigo-600 shadow-sm'
-                      : isDark
-                      ? 'text-slate-400 hover:text-slate-200'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <MousePointer2 size={14} />
-                  <span>Select</span>
-                </button>
+                {[
+                  { id: 'type', label: 'Type', title: 'Type Anywhere (⌘/Ctrl + T)', icon: Type },
+                  { id: 'draw', label: 'Draw', title: 'Draw & Shapes (⌘/Ctrl + Shift + F)', icon: PenTool },
+                  { id: 'select', label: 'Select', title: 'Select & Move Items (⌘/Ctrl + S)', icon: MousePointer2 },
+                ].map(({ id, label, title, icon: Icon }) => {
+                  const active = mode === id;
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => setMode(id)}
+                      title={title}
+                      className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-md text-xs sm:text-sm font-medium transition-colors duration-200 ${
+                        active
+                          ? isDark
+                            ? 'bg-slate-800 text-indigo-400 shadow-sm'
+                            : 'bg-white text-indigo-600 shadow-sm'
+                          : isDark
+                          ? 'text-slate-400 hover:text-slate-200'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Icon size={14} />
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
               </div>
 
-              {/* Draw Sub-Tools */}
               {mode === 'draw' && (
                 <div
-                  className={`flex flex-wrap items-center gap-1.5 sm:gap-2 pl-1.5 sm:pl-2 border-l ${
-                    isDark ? 'border-slate-800' : 'border-black/10'
+                  className={`flex flex-wrap items-center gap-1.5 sm:gap-2 pl-1.5 sm:pl-2 border-l transition-colors duration-200 ${
+                    isDark ? 'border-slate-800' : 'border-slate-200'
                   }`}
                 >
                   <div
-                    className={`flex items-center p-0.5 rounded-lg border ${
+                    className={`flex items-center p-0.5 rounded-lg border transition-colors duration-200 ${
                       isDark
                         ? 'bg-slate-900 border-slate-800'
-                        : 'bg-black/5 border-black/10'
+                        : 'bg-slate-100 border-slate-200'
                     }`}
                   >
-                    {DRAW_TOOLS.map(({ id, label, icon: Icon }) => (
-                      <button
-                        key={id}
-                        onClick={() => setDrawTool(id)}
-                        title={label}
-                        className={`p-1.5 rounded-md transition ${
-                          drawTool === id
-                            ? isDark
-                              ? 'bg-slate-800 text-indigo-400 shadow-sm'
-                              : 'bg-white text-indigo-600 shadow-sm'
-                            : isDark
-                            ? 'text-slate-400 hover:text-slate-200'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        <Icon size={14} />
-                      </button>
-                    ))}
+                    {DRAW_TOOLS.map(({ id, label, icon: Icon }) => {
+                      const active = drawTool === id;
+                      return (
+                        <button
+                          key={id}
+                          onClick={() => setDrawTool(id)}
+                          title={label}
+                          className={`p-1.5 rounded-md transition-colors duration-200 ${
+                            active
+                              ? isDark
+                                ? 'bg-slate-800 text-indigo-400 shadow-sm'
+                                : 'bg-white text-indigo-600 shadow-sm'
+                              : isDark
+                              ? 'text-slate-400 hover:text-slate-200'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          <Icon size={14} />
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {drawTool !== 'eraser' && (
                     <>
                       <label
-                        title="Open full color wheel (R)"
+                        title="Open full color wheel (⌘/Ctrl + R)"
                         style={{
                           background:
                             'conic-gradient(from 0deg, #ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)',
@@ -859,35 +856,42 @@ export default function App() {
                         className="relative w-6 h-6 rounded-full cursor-pointer shadow-sm ring-1 ring-black/20 flex items-center justify-center hover:scale-110 transition-transform shrink-0"
                       >
                         <span
-                          style={{ backgroundColor: getDisplaySwatch(penColor) }}
+                          style={{ backgroundColor: getDisplaySwatch(activeColorValue) }}
                           className="w-2.5 h-2.5 rounded-full ring-1 ring-white"
                         />
                         <input
                           ref={colorInputRef}
                           type="color"
-                          value={penColor}
-                          onChange={(e) => setPenColor(e.target.value)}
+                          value={activeColorValue}
+                          onChange={(e) => setActiveColorValue(e.target.value)}
                           className="sr-only"
                         />
                       </label>
 
                       <div
-                        className={`flex items-center gap-1 sm:gap-1.5 pl-1.5 sm:pl-2 border-l ${
-                          isDark ? 'border-slate-800' : 'border-black/10'
+                        className={`flex items-center gap-1 sm:gap-1.5 pl-1.5 sm:pl-2 border-l transition-colors duration-200 ${
+                          isDark ? 'border-slate-800' : 'border-slate-200'
                         }`}
-                        title="Recently used colors"
+                        title={
+                          drawTool === 'highlighter'
+                            ? 'Highlighter presets'
+                            : 'Recently used colors'
+                        }
                       >
-                        {recentColors.map((color) => (
+                        {(drawTool === 'highlighter'
+                          ? HIGHLIGHTER_COLORS
+                          : recentColors
+                        ).map((color) => (
                           <button
                             key={color}
-                            onClick={() => setPenColor(color)}
+                            onClick={() => setActiveColorValue(color)}
                             style={{ backgroundColor: getDisplaySwatch(color) }}
                             className={`w-4 h-4 rounded-full border border-black/15 transition-transform ${
-                              penColor.toLowerCase() === color.toLowerCase()
+                              activeColorValue.toLowerCase() === color.toLowerCase()
                                 ? 'scale-125 ring-2 ring-offset-1 ring-indigo-500'
                                 : 'hover:scale-110'
                             }`}
-                            title={`Recent color (${color})`}
+                            title={color}
                           />
                         ))}
                       </div>
@@ -908,6 +912,20 @@ export default function App() {
                         {eraserSize}px
                       </span>
                     </div>
+                  ) : drawTool === 'highlighter' ? (
+                    <div className="flex items-center gap-1 pl-1" title="Highlighter width">
+                      <input
+                        type="range"
+                        min="10"
+                        max="48"
+                        value={highlighterSize}
+                        onChange={(e) => setHighlighterSize(Number(e.target.value))}
+                        className="w-16 sm:w-20 accent-indigo-600"
+                      />
+                      <span className="text-[11px] font-mono opacity-70 w-7">
+                        {highlighterSize}px
+                      </span>
+                    </div>
                   ) : (
                     <input
                       type="range"
@@ -922,18 +940,20 @@ export default function App() {
                 </div>
               )}
 
-              {/* Undo (Z) & Redo (X) Controls */}
+              {/* Undo (⌘/Ctrl + Z) & Redo (⌘/Ctrl + X) Controls */}
               <div
-                className={`flex items-center gap-0.5 pl-1.5 sm:pl-2 border-l ${
-                  isDark ? 'border-slate-800' : 'border-black/10'
+                className={`flex items-center gap-0.5 pl-1.5 sm:pl-2 border-l transition-colors duration-200 ${
+                  isDark ? 'border-slate-800' : 'border-slate-200'
                 }`}
               >
                 <button
                   onClick={handleUndo}
                   disabled={!canUndo}
-                  title="Undo (Z)"
-                  className={`p-1.5 rounded transition disabled:opacity-30 ${
-                    isDark ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-black/5'
+                  title="Undo (⌘/Ctrl + Z)"
+                  className={`p-1.5 rounded transition-colors duration-200 disabled:opacity-30 ${
+                    isDark
+                      ? 'text-slate-300 hover:bg-slate-800'
+                      : 'text-slate-600 hover:bg-slate-100'
                   }`}
                 >
                   <Undo2 size={15} />
@@ -941,9 +961,11 @@ export default function App() {
                 <button
                   onClick={handleRedo}
                   disabled={!canRedo}
-                  title="Redo (X)"
-                  className={`p-1.5 rounded transition disabled:opacity-30 ${
-                    isDark ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-black/5'
+                  title="Redo (⌘/Ctrl + X)"
+                  className={`p-1.5 rounded transition-colors duration-200 disabled:opacity-30 ${
+                    isDark
+                      ? 'text-slate-300 hover:bg-slate-800'
+                      : 'text-slate-600 hover:bg-slate-100'
                   }`}
                 >
                   <Redo2 size={15} />
@@ -961,17 +983,15 @@ export default function App() {
             drawTool={drawTool}
             penColor={penColor}
             penSize={penSize}
+            highlighterColor={highlighterColor}
+            highlighterSize={highlighterSize}
             eraserSize={eraserSize}
             theme={theme}
             onUpdate={handleUpdateNotebook}
             onStrokeCommit={recordRecentColor}
           />
         ) : (
-          <div
-            className={`flex-1 flex items-center justify-center p-4 text-center ${
-              isDark ? 'bg-slate-900 text-slate-500' : 'text-slate-400'
-            }`}
-          >
+          <div className="flex-1 flex items-center justify-center p-4 text-center opacity-60 bg-transparent">
             Open the library on the left and select or create a notebook to begin.
           </div>
         )}

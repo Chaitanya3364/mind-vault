@@ -2,14 +2,43 @@ import { jsPDF } from 'jspdf';
 
 const EXPORT_THEMES = {
   light: { bg: '#ffffff', text: '#1e293b', defaultInk: '#0f172a' },
-  sepia: { bg: '#fbf5e9', text: '#3d3122', defaultInk: '#0f172a' },
   dark: { bg: '#0f172a', text: '#f1f5f9', defaultInk: '#f8fafc' },
 };
 
+function computeExportBounds(notebook) {
+  let width = 1200;
+  let height = 1200;
+
+  const boxes =
+    notebook.textBoxes ||
+    (notebook.content ? [{ x: 40, y: 40, text: notebook.content }] : []);
+
+  for (const box of boxes) {
+    if (box.x + 620 > width) width = Math.ceil(box.x + 620);
+    if (box.y + 200 > height) height = Math.ceil(box.y + 200);
+  }
+
+  for (const item of notebook.strokes || []) {
+    if (item.points) {
+      for (const pt of item.points) {
+        if (pt.x + 60 > width) width = Math.ceil(pt.x + 60);
+        if (pt.y + 60 > height) height = Math.ceil(pt.y + 60);
+      }
+    }
+    if (item.start && item.end) {
+      const maxX = Math.max(item.start.x, item.end.x) + 150;
+      const maxY = Math.max(item.start.y, item.end.y) + 150;
+      if (maxX > width) width = Math.ceil(maxX);
+      if (maxY > height) height = Math.ceil(maxY);
+    }
+  }
+
+  return { width, height };
+}
+
 function renderCompositeCanvas(notebook, theme = 'light') {
-  const palette = EXPORT_THEMES[theme] || EXPORT_THEMES.light;
-  const width = 1200;
-  const height = 1200;
+  const palette = theme === 'dark' ? EXPORT_THEMES.dark : EXPORT_THEMES.light;
+  const { width, height } = computeExportBounds(notebook);
   const lineHeight = 24;
 
   const exportCanvas = document.createElement('canvas');
@@ -21,17 +50,17 @@ function renderCompositeCanvas(notebook, theme = 'light') {
   ctx.fillStyle = palette.bg;
   ctx.fillRect(0, 0, width, height);
 
-  // 2. Render positioned text boxes
-  ctx.fillStyle = palette.text;
+  // 2. Positioned Text Boxes
   ctx.font = '16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   ctx.textBaseline = 'top';
 
   const boxes =
     notebook.textBoxes ||
-    (notebook.content ? [{ x: 40, y: 40, text: notebook.content }] : []);
+    (notebook.content ? [{ x: 40, y: 40, text: notebook.content, color: '' }] : []);
 
   for (const box of boxes) {
     if (!box.text) continue;
+    ctx.fillStyle = box.color || palette.text;
     const lines = box.text.split('\n');
     let cursorY = box.y + 22;
 
@@ -41,7 +70,7 @@ function renderCompositeCanvas(notebook, theme = 'light') {
     }
   }
 
-  // 3. Render ink, shapes & eraser strokes onto a separate transparent layer
+  // 3. Ink, Highlighter, Shapes & Eraser Layer
   const inkLayer = document.createElement('canvas');
   inkLayer.width = width;
   inkLayer.height = height;
@@ -63,6 +92,31 @@ function renderCompositeCanvas(notebook, theme = 'light') {
       if (item.points.length === 1) {
         inkCtx.beginPath();
         inkCtx.arc(item.points[0].x, item.points[0].y, item.size / 2, 0, Math.PI * 2);
+        inkCtx.fill();
+      } else {
+        inkCtx.beginPath();
+        inkCtx.moveTo(item.points[0].x, item.points[0].y);
+        for (let i = 1; i < item.points.length; i++) {
+          inkCtx.lineTo(item.points[i].x, item.points[i].y);
+        }
+        inkCtx.stroke();
+      }
+      inkCtx.restore();
+      continue;
+    }
+
+    if (tool === 'highlighter') {
+      if (!item.points || item.points.length < 1) continue;
+      inkCtx.save();
+      inkCtx.globalCompositeOperation = 'source-over';
+      inkCtx.globalAlpha = 0.35;
+      inkCtx.strokeStyle = item.color || '#fde047';
+      inkCtx.fillStyle = item.color || '#fde047';
+      inkCtx.lineWidth = item.size || 22;
+
+      if (item.points.length === 1) {
+        inkCtx.beginPath();
+        inkCtx.arc(item.points[0].x, item.points[0].y, (item.size || 22) / 2, 0, Math.PI * 2);
         inkCtx.fill();
       } else {
         inkCtx.beginPath();
@@ -127,7 +181,6 @@ function renderCompositeCanvas(notebook, theme = 'light') {
     inkCtx.restore();
   }
 
-  // Merge transparent ink layer onto composite canvas
   ctx.drawImage(inkLayer, 0, 0);
   return exportCanvas;
 }
@@ -149,7 +202,7 @@ export function exportAsPDF(notebook, theme = 'light') {
   const imgData = canvas.toDataURL('image/png');
 
   const pdf = new jsPDF({
-    orientation: 'portrait',
+    orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
     unit: 'px',
     format: [canvas.width, canvas.height],
   });

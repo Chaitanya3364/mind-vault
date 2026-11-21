@@ -1,18 +1,20 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import { GripHorizontal, X } from 'lucide-react';
 
-const PAPER_STYLES = {
-  light: 'bg-white text-slate-800',
-  sepia: 'bg-[#fbf5e9] text-[#3d3122]',
-  dark: 'bg-slate-900 text-slate-100',
-};
+const TEXT_COLOR_PRESETS = [
+  { id: 'default', label: 'Theme Default', value: '' },
+  { id: 'blue', label: 'Blue', value: '#2563eb' },
+  { id: 'red', label: 'Red', value: '#dc2626' },
+  { id: 'green', label: 'Emerald', value: '#16a34a' },
+  { id: 'purple', label: 'Purple', value: '#9333ea' },
+  { id: 'amber', label: 'Amber', value: '#d97706' },
+];
 
-// Compute axis-aligned bounding box for any stroke or shape
 function getStrokeBounds(item) {
   const tool = item.tool || 'pen';
   const pad = Math.max(6, (item.size || 3) + 4);
 
-  if (tool === 'pen' || tool === 'eraser') {
+  if (tool === 'pen' || tool === 'highlighter' || tool === 'eraser') {
     if (!item.points || item.points.length === 0) return null;
     let minX = Infinity,
       minY = Infinity,
@@ -64,7 +66,7 @@ function getStrokeBounds(item) {
 function getTextBoxBounds(box) {
   const lines = (box.text || '').split('\n');
   const maxLen = Math.max(10, ...lines.map((l) => l.length));
-  const w = Math.min(600, Math.max(180, maxLen * 9 + 40));
+  const w = Math.min(600, Math.max(210, maxLen * 9 + 40));
   const h = Math.max(1, lines.length) * 24 + 34;
   return { x: box.x, y: box.y, w, h };
 }
@@ -79,7 +81,7 @@ function pointInBox(px, py, box) {
 
 function translateStroke(item, dx, dy) {
   const tool = item.tool || 'pen';
-  if (tool === 'pen' || tool === 'eraser') {
+  if (tool === 'pen' || tool === 'highlighter' || tool === 'eraser') {
     return {
       ...item,
       points: (item.points || []).map((pt) => ({ ...pt, x: pt.x + dx, y: pt.y + dy })),
@@ -98,6 +100,8 @@ export function NoteEditor({
   drawTool = 'pen',
   penColor,
   penSize,
+  highlighterColor = '#fde047',
+  highlighterSize = 22,
   eraserSize = 24,
   theme = 'light',
   onUpdate,
@@ -108,28 +112,61 @@ export function NoteEditor({
   const [isDrawing, setIsDrawing] = useState(false);
   const currentItem = useRef(null);
 
-  // Live eraser cursor position
+  const [boardSize, setBoardSize] = useState({ width: 1600, height: 1400 });
   const [eraserCursor, setEraserCursor] = useState(null);
 
-  // Floating text box interaction state
   const [activeBoxId, setActiveBoxId] = useState(null);
   const [draggingBox, setDraggingBox] = useState(null);
 
-  // Selection mode state ('select' mode)
   const [selectedStrokeIndices, setSelectedStrokeIndices] = useState([]);
   const [selectedBoxIds, setSelectedBoxIds] = useState([]);
-  const [marquee, setMarquee] = useState(null); // { startX, startY, endX, endY }
-  const [selectionDrag, setSelectionDrag] = useState(null); // { lastX, lastY, snapshotStrokes, snapshotBoxes, moved }
+  const [marquee, setMarquee] = useState(null);
+  const [selectionDrag, setSelectionDrag] = useState(null);
+
+  const isDark = theme === 'dark';
 
   const textBoxes =
     notebook.textBoxes ||
     (notebook.content
-      ? [{ id: 'legacy-1', x: 40, y: 40, text: notebook.content }]
+      ? [{ id: 'legacy-1', x: 40, y: 40, text: notebook.content, color: '' }]
       : []);
 
   const strokes = notebook.strokes || [];
 
-  // Clear selection whenever switching notebooks or leaving select mode
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const updateSize = () => {
+      let maxStrokeX = 0;
+      let maxStrokeY = 0;
+      for (const s of strokes) {
+        const b = getStrokeBounds(s);
+        if (b) {
+          if (b.x + b.w > maxStrokeX) maxStrokeX = b.x + b.w + 100;
+          if (b.y + b.h > maxStrokeY) maxStrokeY = b.y + b.h + 100;
+        }
+      }
+      for (const box of textBoxes) {
+        const b = getTextBoxBounds(box);
+        if (b.x + b.w > maxStrokeX) maxStrokeX = b.x + b.w + 100;
+        if (b.y + b.h > maxStrokeY) maxStrokeY = b.y + b.h + 100;
+      }
+
+      const nextW = Math.max(1200, el.clientWidth, Math.ceil(maxStrokeX));
+      const nextH = Math.max(1200, el.clientHeight, Math.ceil(maxStrokeY));
+
+      setBoardSize((prev) =>
+        prev.width === nextW && prev.height === nextH ? prev : { width: nextW, height: nextH }
+      );
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [strokes, textBoxes]);
+
   useEffect(() => {
     setSelectedStrokeIndices([]);
     setSelectedBoxIds([]);
@@ -137,7 +174,6 @@ export function NoteEditor({
     setSelectionDrag(null);
   }, [notebook.id, mode]);
 
-  // Delete selected items with Backspace / Delete key in Select mode
   useEffect(() => {
     if (mode !== 'select') return;
     const handleKeyDown = (e) => {
@@ -164,122 +200,157 @@ export function NoteEditor({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [mode, selectedStrokeIndices, selectedBoxIds, strokes, textBoxes, notebook, onUpdate]);
 
-  const getDisplayColor = (color) => {
-    if (theme === 'dark' && color.toLowerCase() === '#0f172a') return '#f8fafc';
-    return color;
-  };
+  const getDisplayColor = useCallback(
+    (color) => {
+      if (isDark && color.toLowerCase() === '#0f172a') return '#f8fafc';
+      return color;
+    },
+    [isDark]
+  );
 
-  const renderItem = (ctx, item) => {
-    ctx.save();
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+  const renderItem = useCallback(
+    (ctx, item) => {
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
 
-    const tool = item.tool || 'pen';
+      const tool = item.tool || 'pen';
 
-    if (tool === 'eraser') {
-      if (!item.points || item.points.length < 1) {
+      if (tool === 'eraser') {
+        if (!item.points || item.points.length < 1) {
+          ctx.restore();
+          return;
+        }
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.strokeStyle = 'rgba(0,0,0,1)';
+        ctx.fillStyle = 'rgba(0,0,0,1)';
+        ctx.lineWidth = item.size;
+
+        if (item.points.length === 1) {
+          ctx.beginPath();
+          ctx.arc(item.points[0].x, item.points[0].y, item.size / 2, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(item.points[0].x, item.points[0].y);
+          for (let i = 1; i < item.points.length; i++) {
+            ctx.lineTo(item.points[i].x, item.points[i].y);
+          }
+          ctx.stroke();
+        }
         ctx.restore();
         return;
       }
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.strokeStyle = 'rgba(0,0,0,1)';
-      ctx.fillStyle = 'rgba(0,0,0,1)';
-      ctx.lineWidth = item.size;
 
-      if (item.points.length === 1) {
-        ctx.beginPath();
-        ctx.arc(item.points[0].x, item.points[0].y, item.size / 2, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
+      if (tool === 'highlighter') {
+        if (!item.points || item.points.length < 1) {
+          ctx.restore();
+          return;
+        }
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 0.35;
+        ctx.strokeStyle = item.color || '#fde047';
+        ctx.fillStyle = item.color || '#fde047';
+        ctx.lineWidth = item.size || 22;
+
+        if (item.points.length === 1) {
+          ctx.beginPath();
+          ctx.arc(item.points[0].x, item.points[0].y, (item.size || 22) / 2, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(item.points[0].x, item.points[0].y);
+          for (let i = 1; i < item.points.length; i++) {
+            ctx.lineTo(item.points[i].x, item.points[i].y);
+          }
+          ctx.stroke();
+        }
+        ctx.restore();
+        return;
+      }
+
+      ctx.globalCompositeOperation = 'source-over';
+      const color = getDisplayColor(item.color);
+      ctx.strokeStyle = color;
+
+      if (tool === 'pen') {
+        if (!item.points || item.points.length < 2) {
+          ctx.restore();
+          return;
+        }
         ctx.beginPath();
         ctx.moveTo(item.points[0].x, item.points[0].y);
         for (let i = 1; i < item.points.length; i++) {
-          ctx.lineTo(item.points[i].x, item.points[i].y);
+          const pt = item.points[i];
+          ctx.lineWidth = item.size * (pt.pressure || 0.5) * 2;
+          ctx.lineTo(pt.x, pt.y);
         }
         ctx.stroke();
-      }
-      ctx.restore();
-      return;
-    }
-
-    ctx.globalCompositeOperation = 'source-over';
-    const color = getDisplayColor(item.color);
-    ctx.strokeStyle = color;
-
-    if (tool === 'pen') {
-      if (!item.points || item.points.length < 2) {
         ctx.restore();
         return;
       }
-      ctx.beginPath();
-      ctx.moveTo(item.points[0].x, item.points[0].y);
-      for (let i = 1; i < item.points.length; i++) {
-        const pt = item.points[i];
-        ctx.lineWidth = item.size * (pt.pressure || 0.5) * 2;
-        ctx.lineTo(pt.x, pt.y);
+
+      if (!item.start || !item.end) {
+        ctx.restore();
+        return;
       }
+      const { start, end } = item;
+      ctx.lineWidth = item.size;
+      ctx.beginPath();
+
+      if (tool === 'line') {
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+      } else if (tool === 'rect') {
+        ctx.rect(start.x, start.y, end.x - start.x, end.y - start.y);
+      } else if (tool === 'square') {
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const side = Math.max(Math.abs(dx), Math.abs(dy));
+        ctx.rect(
+          start.x,
+          start.y,
+          side * Math.sign(dx || 1),
+          side * Math.sign(dy || 1)
+        );
+      } else if (tool === 'circle') {
+        const radius = Math.hypot(end.x - start.x, end.y - start.y);
+        ctx.arc(start.x, start.y, radius, 0, Math.PI * 2);
+      } else if (tool === 'triangle') {
+        const topX = (start.x + end.x) / 2;
+        ctx.moveTo(topX, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.lineTo(start.x, end.y);
+        ctx.closePath();
+      }
+
       ctx.stroke();
       ctx.restore();
-      return;
-    }
+    },
+    [getDisplayColor]
+  );
 
-    if (!item.start || !item.end) {
-      ctx.restore();
-      return;
-    }
-    const { start, end } = item;
-    ctx.lineWidth = item.size;
-    ctx.beginPath();
+  const redrawCanvas = useCallback(
+    (previewItem = null) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (tool === 'line') {
-      ctx.moveTo(start.x, start.y);
-      ctx.lineTo(end.x, end.y);
-    } else if (tool === 'rect') {
-      ctx.rect(start.x, start.y, end.x - start.x, end.y - start.y);
-    } else if (tool === 'square') {
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const side = Math.max(Math.abs(dx), Math.abs(dy));
-      ctx.rect(
-        start.x,
-        start.y,
-        side * Math.sign(dx || 1),
-        side * Math.sign(dy || 1)
-      );
-    } else if (tool === 'circle') {
-      const radius = Math.hypot(end.x - start.x, end.y - start.y);
-      ctx.arc(start.x, start.y, radius, 0, Math.PI * 2);
-    } else if (tool === 'triangle') {
-      const topX = (start.x + end.x) / 2;
-      ctx.moveTo(topX, start.y);
-      ctx.lineTo(end.x, end.y);
-      ctx.lineTo(start.x, end.y);
-      ctx.closePath();
-    }
-
-    ctx.stroke();
-    ctx.restore();
-  };
-
-  const redrawCanvas = (previewItem = null) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    for (const item of strokes) {
-      renderItem(ctx, item);
-    }
-    if (previewItem) {
-      renderItem(ctx, previewItem);
-    }
-  };
+      for (const item of strokes) {
+        renderItem(ctx, item);
+      }
+      if (previewItem) {
+        renderItem(ctx, previewItem);
+      }
+    },
+    [strokes, renderItem]
+  );
 
   useEffect(() => {
     redrawCanvas();
-  }, [notebook, theme]);
+  }, [redrawCanvas, boardSize.width, boardSize.height]);
 
-  // Drag-to-move handler for individual floating text box in Type mode
   useEffect(() => {
     if (!draggingBox) return;
 
@@ -327,6 +398,7 @@ export function NoteEditor({
       x,
       y,
       text: '',
+      color: '',
     };
 
     onUpdate({
@@ -344,7 +416,19 @@ export function NoteEditor({
     onUpdate({ ...notebook, textBoxes: updatedBoxes, content: '' });
   };
 
-  const handleBoxBlur = (id) => {
+  const handleBoxColorChange = (id, newColor) => {
+    const updatedBoxes = textBoxes.map((box) =>
+      box.id === id ? { ...box, color: newColor } : box
+    );
+    onUpdate({ ...notebook, textBoxes: updatedBoxes, content: '' });
+  };
+
+  const handleBoxBlur = (e, id) => {
+    const parentBox = e.currentTarget.closest('[data-textbox="true"]');
+    if (e.relatedTarget && parentBox && parentBox.contains(e.relatedTarget)) {
+      return;
+    }
+
     setActiveBoxId(null);
     const cleaned = textBoxes.filter((b) => b.id !== id || b.text.trim() !== '');
     if (cleaned.length !== textBoxes.length) {
@@ -372,7 +456,6 @@ export function NoteEditor({
     setActiveBoxId(box.id);
   };
 
-  // Compute combined selection bounding box for visual outline & drag-moving
   const getSelectionGroupBounds = () => {
     const rects = [];
     selectedStrokeIndices.forEach((idx) => {
@@ -396,7 +479,6 @@ export function NoteEditor({
 
   const selectionBounds = mode === 'select' ? getSelectionGroupBounds() : null;
 
-  // Unified Pointer Handlers for Draw Mode AND Select Mode
   const handlePointerDown = (e) => {
     if (mode !== 'draw' && mode !== 'select') return;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -404,9 +486,7 @@ export function NoteEditor({
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // --- SELECT MODE ---
     if (mode === 'select') {
-      // 1. If clicking inside an existing selection group, start dragging it
       if (selectionBounds && pointInBox(x, y, selectionBounds)) {
         setSelectionDrag({
           lastX: x,
@@ -418,7 +498,6 @@ export function NoteEditor({
         return;
       }
 
-      // 2. Hit-test top-most text box
       for (let i = textBoxes.length - 1; i >= 0; i--) {
         const box = textBoxes[i];
         if (pointInBox(x, y, getTextBoxBounds(box))) {
@@ -435,7 +514,6 @@ export function NoteEditor({
         }
       }
 
-      // 3. Hit-test top-most visible stroke/shape (skip eraser paths)
       for (let i = strokes.length - 1; i >= 0; i--) {
         if ((strokes[i].tool || 'pen') === 'eraser') continue;
         const b = getStrokeBounds(strokes[i]);
@@ -453,14 +531,12 @@ export function NoteEditor({
         }
       }
 
-      // 4. Otherwise start a marquee drag selection box
       setSelectedStrokeIndices([]);
       setSelectedBoxIds([]);
       setMarquee({ startX: x, startY: y, endX: x, endY: y });
       return;
     }
 
-    // --- DRAW MODE ---
     setIsDrawing(true);
 
     if (drawTool === 'pen') {
@@ -470,6 +546,14 @@ export function NoteEditor({
         size: penSize,
         points: [{ x, y, pressure: e.pressure || 0.5 }],
       };
+    } else if (drawTool === 'highlighter') {
+      currentItem.current = {
+        tool: 'highlighter',
+        color: highlighterColor,
+        size: highlighterSize,
+        points: [{ x, y }],
+      };
+      redrawCanvas(currentItem.current);
     } else if (drawTool === 'eraser') {
       currentItem.current = {
         tool: 'eraser',
@@ -494,7 +578,6 @@ export function NoteEditor({
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // --- SELECT MODE MOVE ---
     if (mode === 'select') {
       if (selectionDrag) {
         const dx = x - selectionDrag.lastX;
@@ -548,6 +631,10 @@ export function NoteEditor({
       ctx.lineTo(point.x, point.y);
       ctx.stroke();
       ctx.restore();
+    } else if (currentItem.current.tool === 'highlighter') {
+      currentItem.current.points.push({ x, y });
+      // Redraw full stroke as a single translucent pass to avoid dark overlaps
+      redrawCanvas(currentItem.current);
     } else if (currentItem.current.tool === 'eraser') {
       const point = { x, y };
       currentItem.current.points.push(point);
@@ -572,11 +659,9 @@ export function NoteEditor({
   };
 
   const handlePointerUp = () => {
-    // --- SELECT MODE UP ---
     if (mode === 'select') {
       if (selectionDrag) {
         if (selectionDrag.moved) {
-          // Record one clean undo step for the completed drag move
           onUpdate(
             { ...notebook, strokes, textBoxes, content: '' },
             true,
@@ -615,27 +700,28 @@ export function NoteEditor({
       return;
     }
 
-    // --- DRAW MODE UP ---
     if (!isDrawing || !currentItem.current) return;
     setIsDrawing(false);
 
     const item = currentItem.current;
     const isValidPen = item.tool === 'pen' && item.points?.length > 1;
+    const isValidHighlighter = item.tool === 'highlighter' && item.points?.length >= 1;
     const isValidEraser = item.tool === 'eraser' && item.points?.length >= 1;
     const isValidShape =
       item.tool !== 'pen' &&
+      item.tool !== 'highlighter' &&
       item.tool !== 'eraser' &&
       item.start &&
       item.end &&
       (Math.abs(item.end.x - item.start.x) > 2 ||
         Math.abs(item.end.y - item.start.y) > 2);
 
-    if (isValidPen || isValidEraser || isValidShape) {
+    if (isValidPen || isValidHighlighter || isValidEraser || isValidShape) {
       onUpdate({
         ...notebook,
         strokes: [...strokes, item],
       });
-      if (onStrokeCommit && item.tool !== 'eraser') {
+      if (onStrokeCommit && item.tool !== 'eraser' && item.tool !== 'highlighter') {
         onStrokeCommit(item.color);
       }
     } else {
@@ -648,12 +734,14 @@ export function NoteEditor({
     <div
       ref={containerRef}
       onClick={handleCanvasAreaClick}
-      className={`relative flex-1 overflow-auto transition-colors duration-200 ${
+      className={`relative flex-1 overflow-auto bg-transparent ${
         mode === 'type' ? 'cursor-text' : ''
-      } ${PAPER_STYLES[theme]}`}
+      } ${isDark ? 'text-slate-100' : 'text-slate-800'}`}
     >
-      {/* Inner 1200x1200 Workspace Sheet */}
-      <div className="relative w-[1200px] h-[1200px]">
+      <div
+        style={{ width: `${boardSize.width}px`, height: `${boardSize.height}px` }}
+        className="relative"
+      >
         {textBoxes.length === 0 && mode === 'type' && (
           <div className="pointer-events-none select-none p-10 text-sm opacity-40">
             Click anywhere on the page to start typing...
@@ -664,6 +752,7 @@ export function NoteEditor({
         {textBoxes.map((box) => {
           const isFocused = activeBoxId === box.id;
           const lineCount = Math.max(1, box.text.split('\n').length);
+          const defaultTextSwatch = isDark ? '#f1f5f9' : '#1e293b';
 
           return (
             <div
@@ -684,27 +773,69 @@ export function NoteEditor({
             >
               {mode === 'type' && (
                 <div
-                  className={`flex items-center justify-between px-1.5 py-0.5 rounded-t-md text-xs transition-opacity ${
+                  className={`flex items-center justify-between gap-2 px-1.5 py-1 rounded-t-md text-xs transition-opacity ${
                     isFocused ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                   } ${
-                    theme === 'dark'
-                      ? 'bg-slate-800/90 text-slate-400'
-                      : 'bg-slate-200/80 text-slate-600'
+                    isDark
+                      ? 'bg-slate-800/95 text-slate-400'
+                      : 'bg-slate-200/90 text-slate-600'
                   }`}
                 >
                   <button
                     type="button"
                     onPointerDown={(e) => startDraggingBox(e, box)}
                     title="Drag to move text"
-                    className="cursor-grab active:cursor-grabbing p-0.5 hover:text-indigo-500"
+                    className="cursor-grab active:cursor-grabbing p-0.5 hover:text-indigo-500 shrink-0"
                   >
                     <GripHorizontal size={13} />
                   </button>
+
+                  <div
+                    onMouseDown={(e) => e.preventDefault()}
+                    className="flex items-center gap-1"
+                  >
+                    {TEXT_COLOR_PRESETS.map((preset) => {
+                      const swatchColor = preset.value || defaultTextSwatch;
+                      const isSelected = (box.color || '') === preset.value;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleBoxColorChange(box.id, preset.value);
+                          }}
+                          style={{ backgroundColor: swatchColor }}
+                          title={preset.label}
+                          className={`w-3.5 h-3.5 rounded-full border border-black/20 transition-transform ${
+                            isSelected ? 'scale-125 ring-1 ring-indigo-500' : 'hover:scale-110'
+                          }`}
+                        />
+                      );
+                    })}
+
+                    <label
+                      title="Custom text color"
+                      style={{
+                        background:
+                          'conic-gradient(from 0deg, #ef4444, #eab308, #22c55e, #3b82f6, #a855f7, #ef4444)',
+                      }}
+                      className="w-3.5 h-3.5 rounded-full cursor-pointer hover:scale-110 transition-transform ml-0.5 ring-1 ring-black/20"
+                    >
+                      <input
+                        type="color"
+                        value={box.color || defaultTextSwatch}
+                        onChange={(e) => handleBoxColorChange(box.id, e.target.value)}
+                        className="sr-only"
+                      />
+                    </label>
+                  </div>
+
                   <button
                     type="button"
                     onClick={(e) => handleDeleteBox(e, box.id)}
                     title="Delete text box"
-                    className="p-0.5 hover:text-red-500"
+                    className="p-0.5 hover:text-red-500 shrink-0"
                   >
                     <X size={12} />
                   </button>
@@ -716,11 +847,12 @@ export function NoteEditor({
                 rows={lineCount}
                 value={box.text}
                 onFocus={() => setActiveBoxId(box.id)}
-                onBlur={() => handleBoxBlur(box.id)}
+                onBlur={(e) => handleBoxBlur(e, box.id)}
                 onChange={(e) => handleBoxTextChange(box.id, e.target.value)}
                 placeholder="Type here..."
                 style={{
-                  width: `${Math.min(600, Math.max(180, box.text.length * 9 + 40))}px`,
+                  width: `${Math.min(600, Math.max(210, box.text.length * 9 + 40))}px`,
+                  color: box.color || 'inherit',
                 }}
                 className="px-2.5 py-1.5 text-base leading-6 bg-transparent resize focus:outline-none block"
               />
@@ -728,11 +860,11 @@ export function NoteEditor({
           );
         })}
 
-        {/* Freehand Ink, Eraser, Shapes & Selection Canvas Layer */}
+        {/* Full-Width Dynamic Canvas Layer */}
         <canvas
           ref={canvasRef}
-          width={1200}
-          height={1200}
+          width={boardSize.width}
+          height={boardSize.height}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -788,7 +920,7 @@ export function NoteEditor({
               height: `${eraserSize}px`,
             }}
             className={`pointer-events-none absolute rounded-full border z-30 ${
-              theme === 'dark'
+              isDark
                 ? 'border-slate-300 bg-white/10'
                 : 'border-slate-700 bg-black/5'
             }`}
