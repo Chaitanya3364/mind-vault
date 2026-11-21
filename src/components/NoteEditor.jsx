@@ -117,7 +117,7 @@ export function NoteEditor({
   const [isDrawing, setIsDrawing] = useState(false);
   const currentItem = useRef(null);
 
-  const [boardSize, setBoardSize] = useState({ width: 1600, height: 1400 });
+  const [boardSize, setBoardSize] = useState({ width: 1200, height: 800 });
   const [eraserCursor, setEraserCursor] = useState(null);
 
   const [activeBoxId, setActiveBoxId] = useState(null);
@@ -147,34 +147,14 @@ export function NoteEditor({
   const strokes = notebook.strokes || [];
   const images = notebook.images || [];
 
+  // Lock board size strictly to the visible container viewport (no vertical/horizontal page scroll)
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     const updateSize = () => {
-      let maxStrokeX = 0;
-      let maxStrokeY = 0;
-      for (const s of strokes) {
-        const b = getStrokeBounds(s);
-        if (b) {
-          if (b.x + b.w > maxStrokeX) maxStrokeX = b.x + b.w + 100;
-          if (b.y + b.h > maxStrokeY) maxStrokeY = b.y + b.h + 100;
-        }
-      }
-      for (const box of textBoxes) {
-        const b = getTextBoxBounds(box);
-        if (b.x + b.w > maxStrokeX) maxStrokeX = b.x + b.w + 100;
-        if (b.y + b.h > maxStrokeY) maxStrokeY = b.y + b.h + 100;
-      }
-      for (const img of images) {
-        const b = getImageBounds(img);
-        if (b.x + b.w > maxStrokeX) maxStrokeX = b.x + b.w + 100;
-        if (b.y + b.h > maxStrokeY) maxStrokeY = b.y + b.h + 100;
-      }
-
-      const nextW = Math.max(1200, el.clientWidth, Math.ceil(maxStrokeX));
-      const nextH = Math.max(1200, el.clientHeight, Math.ceil(maxStrokeY));
-
+      const nextW = Math.max(300, el.clientWidth);
+      const nextH = Math.max(300, el.clientHeight);
       setBoardSize((prev) =>
         prev.width === nextW && prev.height === nextH ? prev : { width: nextW, height: nextH }
       );
@@ -184,7 +164,7 @@ export function NoteEditor({
     const observer = new ResizeObserver(updateSize);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [strokes, textBoxes, images]);
+  }, []);
 
   useEffect(() => {
     setSelectedStrokeIndices([]);
@@ -255,9 +235,7 @@ export function NoteEditor({
           const file = item.getAsFile();
           if (file) {
             e.preventDefault();
-            const scrollX = containerRef.current?.scrollLeft || 0;
-            const scrollY = containerRef.current?.scrollTop || 0;
-            onInsertImageFile(file, scrollX + 60, scrollY + 60);
+            onInsertImageFile(file, 60, 60);
             break;
           }
         }
@@ -418,21 +396,17 @@ export function NoteEditor({
     redrawCanvas();
   }, [redrawCanvas, boardSize.width, boardSize.height]);
 
-  // Dragging Text Boxes
+  // Dragging Text Boxes (clamped inside visible viewport)
   useEffect(() => {
     if (!draggingBox) return;
 
     const handleWindowPointerMove = (e) => {
       if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const newX = Math.max(
-        8,
-        e.clientX - rect.left + containerRef.current.scrollLeft - draggingBox.offsetX
-      );
-      const newY = Math.max(
-        8,
-        e.clientY - rect.top + containerRef.current.scrollTop - draggingBox.offsetY
-      );
+      const maxX = Math.max(8, rect.width - 120);
+      const maxY = Math.max(8, rect.height - 48);
+      const newX = Math.min(maxX, Math.max(8, e.clientX - rect.left - draggingBox.offsetX));
+      const newY = Math.min(maxY, Math.max(8, e.clientY - rect.top - draggingBox.offsetY));
 
       const updatedBoxes = textBoxes.map((box) =>
         box.id === draggingBox.id ? { ...box, x: newX, y: newY } : box
@@ -452,21 +426,17 @@ export function NoteEditor({
     };
   }, [draggingBox, textBoxes, notebook, onUpdate]);
 
-  // Dragging Images
+  // Dragging Images (clamped inside visible viewport)
   useEffect(() => {
     if (!draggingImage) return;
 
     const handleWindowPointerMove = (e) => {
       if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const newX = Math.max(
-        8,
-        e.clientX - rect.left + containerRef.current.scrollLeft - draggingImage.offsetX
-      );
-      const newY = Math.max(
-        8,
-        e.clientY - rect.top + containerRef.current.scrollTop - draggingImage.offsetY
-      );
+      const maxX = Math.max(8, rect.width - 60);
+      const maxY = Math.max(8, rect.height - 60);
+      const newX = Math.min(maxX, Math.max(8, e.clientX - rect.left - draggingImage.offsetX));
+      const newY = Math.min(maxY, Math.max(8, e.clientY - rect.top - draggingImage.offsetY));
 
       const updatedImages = images.map((img) =>
         img.id === draggingImage.id ? { ...img, x: newX, y: newY } : img
@@ -504,7 +474,8 @@ export function NoteEditor({
 
     const handleWindowPointerMove = (e) => {
       const dx = e.clientX - resizingImage.startX;
-      const nextWidth = Math.max(60, Math.min(1400, resizingImage.startWidth + dx));
+      const maxW = Math.max(120, boardSize.width - 32);
+      const nextWidth = Math.max(60, Math.min(maxW, resizingImage.startWidth + dx));
       const nextHeight = Math.round(nextWidth / resizingImage.aspectRatio);
 
       const updatedImages = images.map((img) =>
@@ -535,7 +506,7 @@ export function NoteEditor({
       window.removeEventListener('pointermove', handleWindowPointerMove);
       window.removeEventListener('pointerup', handleWindowPointerUp);
     };
-  }, [resizingImage, images, strokes, textBoxes, notebook, onUpdate]);
+  }, [resizingImage, images, strokes, textBoxes, boardSize.width, notebook, onUpdate]);
 
   // Drag-and-Drop Image Handlers
   const handleDragOver = (e) => {
@@ -564,8 +535,8 @@ export function NoteEditor({
     if (imageFiles.length === 0 || !onInsertImageFile) return;
 
     const rect = containerRef.current.getBoundingClientRect();
-    const dropX = Math.max(16, e.clientX - rect.left + containerRef.current.scrollLeft);
-    const dropY = Math.max(16, e.clientY - rect.top + containerRef.current.scrollTop);
+    const dropX = Math.max(16, Math.min(rect.width - 120, e.clientX - rect.left));
+    const dropY = Math.max(16, Math.min(rect.height - 120, e.clientY - rect.top));
 
     imageFiles.forEach((file, index) => {
       onInsertImageFile(file, dropX + index * 24, dropY + index * 24);
@@ -580,8 +551,8 @@ export function NoteEditor({
     if (e.target.closest('[data-textbox="true"]')) return;
 
     const rect = containerRef.current.getBoundingClientRect();
-    const x = Math.max(16, e.clientX - rect.left + containerRef.current.scrollLeft - 8);
-    const y = Math.max(16, e.clientY - rect.top + containerRef.current.scrollTop - 14);
+    const x = Math.max(16, Math.min(rect.width - 220, e.clientX - rect.left - 8));
+    const y = Math.max(16, Math.min(rect.height - 48, e.clientY - rect.top - 14));
 
     const nonEmptyBoxes = textBoxes.filter((b) => b.text.trim() !== '');
     const newBox = {
@@ -637,8 +608,8 @@ export function NoteEditor({
   const startDraggingBox = (e, box) => {
     e.stopPropagation();
     const rect = containerRef.current.getBoundingClientRect();
-    const pointerX = e.clientX - rect.left + containerRef.current.scrollLeft;
-    const pointerY = e.clientY - rect.top + containerRef.current.scrollTop;
+    const pointerX = e.clientX - rect.left;
+    const pointerY = e.clientY - rect.top;
     setDraggingBox({
       id: box.id,
       offsetX: pointerX - box.x,
@@ -650,8 +621,8 @@ export function NoteEditor({
   const startDraggingImage = (e, img) => {
     e.stopPropagation();
     const rect = containerRef.current.getBoundingClientRect();
-    const pointerX = e.clientX - rect.left + containerRef.current.scrollLeft;
-    const pointerY = e.clientY - rect.top + containerRef.current.scrollTop;
+    const pointerX = e.clientX - rect.left;
+    const pointerY = e.clientY - rect.top;
     setDraggingImage({
       id: img.id,
       offsetX: pointerX - img.x,
@@ -729,7 +700,6 @@ export function NoteEditor({
         return;
       }
 
-      // Check Images
       for (let i = images.length - 1; i >= 0; i--) {
         const img = images[i];
         if (pointInBox(x, y, getImageBounds(img))) {
@@ -749,7 +719,6 @@ export function NoteEditor({
         }
       }
 
-      // Check Text Boxes
       for (let i = textBoxes.length - 1; i >= 0; i--) {
         const box = textBoxes[i];
         if (pointInBox(x, y, getTextBoxBounds(box))) {
@@ -768,7 +737,6 @@ export function NoteEditor({
         }
       }
 
-      // Check Strokes
       for (let i = strokes.length - 1; i >= 0; i--) {
         if ((strokes[i].tool || 'pen') === 'eraser') continue;
         const b = getStrokeBounds(strokes[i]);
@@ -848,12 +816,20 @@ export function NoteEditor({
         );
         const nextBoxes = textBoxes.map((box) =>
           selectedBoxIds.includes(box.id)
-            ? { ...box, x: Math.max(8, box.x + dx), y: Math.max(8, box.y + dy) }
+            ? {
+                ...box,
+                x: Math.min(boardSize.width - 100, Math.max(8, box.x + dx)),
+                y: Math.min(boardSize.height - 40, Math.max(8, box.y + dy)),
+              }
             : box
         );
         const nextImages = images.map((img) =>
           selectedImageIds.includes(img.id)
-            ? { ...img, x: Math.max(8, img.x + dx), y: Math.max(8, img.y + dy) }
+            ? {
+                ...img,
+                x: Math.min(boardSize.width - 60, Math.max(8, img.x + dx)),
+                y: Math.min(boardSize.height - 60, Math.max(8, img.y + dy)),
+              }
             : img
         );
 
@@ -1013,7 +989,7 @@ export function NoteEditor({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`relative flex-1 overflow-auto bg-transparent ${
+      className={`relative flex-1 overflow-hidden bg-transparent ${
         mode === 'type' ? 'cursor-text' : ''
       } ${isDark ? 'text-slate-100' : 'text-slate-800'}`}
     >
@@ -1030,17 +1006,14 @@ export function NoteEditor({
         </div>
       )}
 
-      <div
-        style={{ width: `${boardSize.width}px`, height: `${boardSize.height}px` }}
-        className="relative"
-      >
+      <div className="relative w-full h-full overflow-hidden">
         {textBoxes.length === 0 && images.length === 0 && mode === 'type' && (
           <div className="pointer-events-none select-none p-10 text-sm opacity-40">
             Click anywhere to type, or drag &amp; drop / paste an image...
           </div>
         )}
 
-        {/* Floating Resizable Images Layer (renders beneath ink so you can annotate over images) */}
+        {/* Floating Resizable Images Layer */}
         {images.map((img) => {
           const isSelected =
             activeImageId === img.id || selectedImageIds.includes(img.id);
@@ -1080,7 +1053,6 @@ export function NoteEditor({
                 }`}
               />
 
-              {/* Top Move & Delete Controls */}
               {canInteractWithImage && (
                 <div
                   className={`absolute -top-7 left-0 right-0 flex items-center justify-between px-1.5 py-0.5 rounded-t-md text-xs transition-opacity ${
@@ -1114,7 +1086,6 @@ export function NoteEditor({
                 </div>
               )}
 
-              {/* Bottom-Right Corner Resize Handle */}
               {canInteractWithImage && (
                 <button
                   type="button"
@@ -1243,7 +1214,7 @@ export function NoteEditor({
           );
         })}
 
-        {/* Full-Width Dynamic Canvas Layer */}
+        {/* Fixed-Viewport Canvas Layer */}
         <canvas
           ref={canvasRef}
           width={boardSize.width}
