@@ -807,7 +807,7 @@ export default function App() {
   const isDark = theme === 'dark';
 
   const getDisplaySwatch = (color) =>
-    isDark && color.toLowerCase() === '#0f172a' ? '#f8fafc' : color;
+    isDark && color?.toLowerCase() === '#0f172a' ? '#f8fafc' : (color || '#0f172a');
 
   const canUndo = (activePage?.history?.length || 0) > 0;
   const canRedo = (activePage?.redoStack?.length || 0) > 0;
