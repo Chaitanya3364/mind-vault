@@ -416,17 +416,21 @@ export function NoteEditor({
 
     const handleWindowPointerUp = () => {
       // Pointer moves are applied without history for smooth dragging. Commit one
-      // undo snapshot when the gesture ends so a whole drag is one undo action.
-      onUpdate(
-        { ...notebook, textBoxes, content: '' },
-        true,
-        {
-          strokes,
-          textBoxes: draggingBox.snapshotBoxes,
-          images,
-          content: notebook.content || '',
-        }
-      );
+      // undo snapshot only if the box actually moved.
+      const originalBox = draggingBox.snapshotBoxes.find((box) => box.id === draggingBox.id);
+      const currentBox = textBoxes.find((box) => box.id === draggingBox.id);
+      if (originalBox && currentBox && (originalBox.x !== currentBox.x || originalBox.y !== currentBox.y)) {
+        onUpdate(
+          { ...notebook, textBoxes, content: '' },
+          true,
+          {
+            strokes,
+            textBoxes: draggingBox.snapshotBoxes,
+            images,
+            content: notebook.content || '',
+          }
+        );
+      }
       setDraggingBox(null);
     };
 
