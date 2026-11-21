@@ -216,30 +216,43 @@ export default function App() {
   };
 
   useEffect(() => {
+    let cancelled = false;
+
     async function init() {
-      const saved = await loadWorkspace();
-      if (saved && saved.length > 0) {
-        const normalizedFolders = saved.map((f) => ({
-          ...f,
-          notebooks: (f.notebooks || []).map(normalizeNotebook),
-        }));
-        setFolders(normalizedFolders);
-        setActiveFolderId(normalizedFolders[0].id);
-        if (normalizedFolders[0].notebooks.length > 0) {
-          setActiveNotebookId(normalizedFolders[0].notebooks[0].id);
+      try {
+        const saved = await loadWorkspace();
+        if (cancelled) return;
+        if (Array.isArray(saved) && saved.length > 0) {
+          const normalizedFolders = saved.map((folder) => ({
+            ...folder,
+            notebooks: (folder.notebooks || []).map(normalizeNotebook),
+          }));
+          setFolders(normalizedFolders);
+          setActiveFolderId(normalizedFolders[0]?.id || null);
+          setActiveNotebookId(normalizedFolders[0]?.notebooks?.[0]?.id || null);
         }
+        setIsLoaded(true);
+      } catch (error) {
+        console.error('MindVault could not load the saved workspace:', error);
+        // Do not enable autosave after a failed read: doing so could overwrite
+        // an existing workspace with the in-memory starter data.
       }
-      setIsLoaded(true);
     }
+
     init();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (!isLoaded) return;
-    const timer = setInterval(async () => {
-      await saveWorkspace(foldersRef.current);
-    }, 60000);
-
+    const saveLatestWorkspace = async () => {
+      try {
+        await saveWorkspace(foldersRef.current);
+      } catch (error) {
+        console.error('MindVault autosave failed:', error);
+      }
+    };
+    const timer = setInterval(saveLatestWorkspace, 60000);
     return () => clearInterval(timer);
   }, [isLoaded]);
 
