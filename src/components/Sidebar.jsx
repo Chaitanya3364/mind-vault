@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -10,6 +10,10 @@ import {
   Pencil,
   Trash2,
   Folder,
+  Settings,
+  Sun,
+  Moon,
+  Keyboard,
 } from 'lucide-react';
 
 const TAG_COLORS = [
@@ -23,10 +27,25 @@ const TAG_COLORS = [
   '#64748b',
 ];
 
+const SHORTCUTS_LIST = [
+  { action: 'Type Mode', mac: '⌘ + T', win: 'Ctrl + T' },
+  { action: 'Pen / Write', mac: '⌘ + ⇧ + F', win: 'Ctrl + Shift + F' },
+  { action: 'Highlighter', mac: '⌘ + H', win: 'Ctrl + H' },
+  { action: 'Eraser', mac: '⌘ + E', win: 'Ctrl + E' },
+  { action: 'Color Picker', mac: '⌘ + R', win: 'Ctrl + R' },
+  { action: 'Select & Move', mac: '⌘ + S', win: 'Ctrl + S' },
+  { action: 'Undo', mac: '⌘ + Z', win: 'Ctrl + Z' },
+  { action: 'Redo', mac: '⌘ + X', win: 'Ctrl + X' },
+  { action: 'Prev / Next Page', mac: '← / →', win: '← / →' },
+  { action: 'Delete Selected', mac: '⌫ / Del', win: 'Del' },
+  { action: 'Exit Text Box', mac: 'Esc', win: 'Esc' },
+];
+
 export function Sidebar({
   isOpen,
   width,
   theme = 'light',
+  onThemeChange,
   onStartResize,
   onClose,
   folders,
@@ -54,9 +73,26 @@ export function Sidebar({
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [colorPickerId, setColorPickerId] = useState(null);
 
+  // Settings icon dropdown state
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const settingsRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (settingsRef.current && !settingsRef.current.contains(e.target)) {
+        setIsSettingsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   if (!isOpen) return null;
 
   const isDark = theme === 'dark';
+  const isMac =
+    typeof navigator !== 'undefined' &&
+    /Mac|iPod|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
 
   const submitNewFolder = (e) => {
     e.preventDefault();
@@ -130,9 +166,10 @@ export function Sidebar({
             : 'bg-slate-50 text-slate-800 border-slate-200'
         }`}
       >
-        {/* Sidebar Header */}
+        {/* Sidebar Header with Settings Icon beside New Folder Icon */}
         <div
-          className={`p-3.5 sm:p-4 flex items-center justify-between border-b transition-colors duration-200 ${
+          ref={settingsRef}
+          className={`relative p-3.5 sm:p-4 flex items-center justify-between border-b shrink-0 transition-colors duration-200 ${
             isDark ? 'border-slate-800' : 'border-slate-200'
           }`}
         >
@@ -143,10 +180,30 @@ export function Sidebar({
           >
             MindVault
           </span>
-          <div className="flex gap-1 shrink-0">
+
+          <div className="flex items-center gap-1 shrink-0">
+            {/* Icon-Only Settings Button */}
+            <button
+              type="button"
+              onClick={() => setIsSettingsOpen((prev) => !prev)}
+              title="Settings (Themes & Shortcuts)"
+              className={`p-2 md:p-1.5 rounded transition-colors ${
+                isSettingsOpen
+                  ? isDark
+                    ? 'bg-slate-800 text-indigo-400'
+                    : 'bg-slate-200 text-indigo-600'
+                  : isDark
+                  ? 'hover:bg-slate-800 text-slate-300 hover:text-white'
+                  : 'hover:bg-slate-200/70 text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Settings size={18} />
+            </button>
+
             <button
               type="button"
               onClick={() => {
+                setIsSettingsOpen(false);
                 setIsAddingFolder(true);
                 setNewFolderName('');
               }}
@@ -159,6 +216,7 @@ export function Sidebar({
             >
               <FolderPlus size={18} />
             </button>
+
             <button
               type="button"
               onClick={onClose}
@@ -172,13 +230,108 @@ export function Sidebar({
               <PanelLeftClose size={18} />
             </button>
           </div>
+
+          {/* Settings Dropdown Panel */}
+          {isSettingsOpen && (
+            <div
+              className={`absolute left-2 right-2 top-full mt-1.5 rounded-xl shadow-xl border p-3 z-50 space-y-3 transition-colors duration-200 ${
+                isDark
+                  ? 'bg-slate-950 border-slate-800 text-slate-100'
+                  : 'bg-white border-slate-200 text-slate-800'
+              }`}
+            >
+              {/* Theme Switcher */}
+              <div>
+                <div
+                  className={`text-[11px] font-semibold uppercase tracking-wider mb-1.5 ${
+                    isDark ? 'text-slate-400' : 'text-slate-500'
+                  }`}
+                >
+                  Theme
+                </div>
+                <div
+                  className={`grid grid-cols-2 gap-1 p-1 rounded-lg border ${
+                    isDark
+                      ? 'bg-slate-900 border-slate-800'
+                      : 'bg-slate-100 border-slate-200'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onThemeChange?.('light')}
+                    className={`flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                      !isDark
+                        ? 'bg-white text-amber-600 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Sun size={13} />
+                    <span>Light</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onThemeChange?.('dark')}
+                    className={`flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                      isDark
+                        ? 'bg-slate-800 text-indigo-400 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Moon size={13} />
+                    <span>Dark</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Shortcut Details */}
+              <div
+                className={`pt-2 border-t ${
+                  isDark ? 'border-slate-800' : 'border-slate-100'
+                }`}
+              >
+                <div
+                  className={`flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider mb-1.5 ${
+                    isDark ? 'text-slate-400' : 'text-slate-500'
+                  }`}
+                >
+                  <Keyboard size={12} />
+                  <span>Shortcuts</span>
+                </div>
+                <div className="space-y-1 max-h-56 overflow-y-auto pr-0.5">
+                  {SHORTCUTS_LIST.map((item) => (
+                    <div
+                      key={item.action}
+                      className="flex items-center justify-between gap-2 text-xs py-0.5"
+                    >
+                      <span
+                        className={`truncate ${
+                          isDark ? 'text-slate-300' : 'text-slate-600'
+                        }`}
+                      >
+                        {item.action}
+                      </span>
+                      <kbd
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-mono shrink-0 border ${
+                          isDark
+                            ? 'bg-slate-900 border-slate-700 text-slate-300'
+                            : 'bg-slate-50 border-slate-300 text-slate-700'
+                        }`}
+                      >
+                        {isMac ? item.mac : item.win}
+                      </kbd>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Inline New Folder Input */}
         {isAddingFolder && (
           <form
             onSubmit={submitNewFolder}
-            className={`p-2 border-b transition-colors ${
+            className={`p-2 border-b shrink-0 transition-colors ${
               isDark
                 ? 'border-slate-800 bg-slate-800/50'
                 : 'border-slate-200 bg-slate-100'

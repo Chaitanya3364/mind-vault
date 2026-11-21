@@ -5,20 +5,27 @@ const EXPORT_THEMES = {
   dark: { bg: '#0f172a', text: '#f1f5f9', defaultInk: '#f8fafc' },
 };
 
-function computeExportBounds(notebook) {
+function computeExportBounds(pageData) {
   let width = 1200;
   let height = 1200;
 
   const boxes =
-    notebook.textBoxes ||
-    (notebook.content ? [{ x: 40, y: 40, text: notebook.content }] : []);
+    pageData.textBoxes ||
+    (pageData.content ? [{ x: 40, y: 40, text: pageData.content }] : []);
 
   for (const box of boxes) {
     if (box.x + 620 > width) width = Math.ceil(box.x + 620);
     if (box.y + 200 > height) height = Math.ceil(box.y + 200);
   }
 
-  for (const item of notebook.strokes || []) {
+  for (const img of pageData.images || []) {
+    const right = (img.x || 0) + (img.width || 240) + 60;
+    const bottom = (img.y || 0) + (img.height || 180) + 60;
+    if (right > width) width = Math.ceil(right);
+    if (bottom > height) height = Math.ceil(bottom);
+  }
+
+  for (const item of pageData.strokes || []) {
     if (item.points) {
       for (const pt of item.points) {
         if (pt.x + 60 > width) width = Math.ceil(pt.x + 60);
@@ -36,9 +43,18 @@ function computeExportBounds(notebook) {
   return { width, height };
 }
 
-function renderCompositeCanvas(notebook, theme = 'light') {
+function loadImageElement(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+async function renderPageCanvas(pageData, theme = 'light') {
   const palette = theme === 'dark' ? EXPORT_THEMES.dark : EXPORT_THEMES.light;
-  const { width, height } = computeExportBounds(notebook);
+  const { width, height } = computeExportBounds(pageData);
   const lineHeight = 24;
 
   const exportCanvas = document.createElement('canvas');
@@ -50,13 +66,28 @@ function renderCompositeCanvas(notebook, theme = 'light') {
   ctx.fillStyle = palette.bg;
   ctx.fillRect(0, 0, width, height);
 
-  // 2. Positioned Text Boxes
+  // 2. Embedded Images (drawn beneath text & ink)
+  for (const imgItem of pageData.images || []) {
+    if (!imgItem.src) continue;
+    const loaded = await loadImageElement(imgItem.src);
+    if (loaded) {
+      ctx.drawImage(
+        loaded,
+        imgItem.x || 0,
+        imgItem.y || 0,
+        imgItem.width || loaded.naturalWidth,
+        imgItem.height || loaded.naturalHeight
+      );
+    }
+  }
+
+  // 3. Positioned Text Boxes
   ctx.font = '16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   ctx.textBaseline = 'top';
 
   const boxes =
-    notebook.textBoxes ||
-    (notebook.content ? [{ x: 40, y: 40, text: notebook.content, color: '' }] : []);
+    pageData.textBoxes ||
+    (pageData.content ? [{ x: 40, y: 40, text: pageData.content, color: '' }] : []);
 
   for (const box of boxes) {
     if (!box.text) continue;
@@ -70,7 +101,7 @@ function renderCompositeCanvas(notebook, theme = 'light') {
     }
   }
 
-  // 3. Ink, Highlighter, Shapes & Eraser Layer
+  // 4. Ink, Highlighter, Shapes & Eraser Layer
   const inkLayer = document.createElement('canvas');
   inkLayer.width = width;
   inkLayer.height = height;
@@ -78,7 +109,7 @@ function renderCompositeCanvas(notebook, theme = 'light') {
   inkCtx.lineCap = 'round';
   inkCtx.lineJoin = 'round';
 
-  for (const item of notebook.strokes || []) {
+  for (const item of pageData.strokes || []) {
     const tool = item.tool || 'pen';
 
     if (tool === 'eraser') {
@@ -185,28 +216,54 @@ function renderCompositeCanvas(notebook, theme = 'light') {
   return exportCanvas;
 }
 
+function getNotebookPages(notebook) {
+  if (Array.isArray(notebook.pages) && notebook.pages.length > 0) {
+    return notebook.pages;
+  }
+  return [notebook];
+}
+
 function sanitizeFilename(title) {
   return (title || 'notebook').replace(/[^a-z0-9-_]/gi, '_').toLowerCase();
 }
 
-export function exportAsPNG(notebook, theme = 'light') {
-  const canvas = renderCompositeCanvas(notebook, theme);
+export async function exportAsPNG(notebook, theme = 'light') {
+  const pages = getNotebookPages(notebook);
+  const pageIndex = Math.min(
+    Math.max(0, notebook.activePageIndex || 0),
+    pages.length - 1
+  );
+  const canvas = await renderPageCanvas(pages[pageIndex], theme);
   const link = document.createElement('a');
-  link.download = `${sanitizeFilename(notebook.title)}.png`;
+  const suffix = pages.length > 1 ? `_page_${pageIndex + 1}` : '';
+  link.download = `${sanitizeFilename(notebook.title)}${suffix}.png`;
   link.href = canvas.toDataURL('image/png');
   link.click();
 }
 
-export function exportAsPDF(notebook, theme = 'light') {
-  const canvas = renderCompositeCanvas(notebook, theme);
-  const imgData = canvas.toDataURL('image/png');
+export async function exportAsPDF(notebook, theme = 'light') {
+  const pages = getNotebookPages(notebook);
+  let pdf = null;
 
-  const pdf = new jsPDF({
-    orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
-    unit: 'px',
-    format: [canvas.width, canvas.height],
-  });
+  for (let idx = 0; idx < pages.length; idx++) {
+    const canvas = await renderPageCanvas(pages[idx], theme);
+    const imgData = canvas.toDataURL('image/png');
+    const orientation = canvas.width > canvas.height ? 'landscape' : 'portrait';
 
-  pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
-  pdf.save(`${sanitizeFilename(notebook.title)}.pdf`);
+    if (idx === 0) {
+      pdf = new jsPDF({
+        orientation,
+        unit: 'px',
+        format: [canvas.width, canvas.height],
+      });
+    } else {
+      pdf.addPage([canvas.width, canvas.height], orientation);
+    }
+
+    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+  }
+
+  if (pdf) {
+    pdf.save(`${sanitizeFilename(notebook.title)}.pdf`);
+  }
 }

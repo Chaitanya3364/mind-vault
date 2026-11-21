@@ -5,15 +5,18 @@ import {
   PenTool,
   Highlighter,
   MousePointer2,
+  ImagePlus,
   Save,
   Undo2,
   Redo2,
   Trash2,
   Download,
-  Sun,
-  Moon,
   Eraser,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  FilePlus2,
+  FileX2,
   FileImage,
   FileText,
   Check,
@@ -28,6 +31,52 @@ import { NoteEditor } from './components/NoteEditor';
 import { loadWorkspace, saveWorkspace } from './db';
 import { exportAsPNG, exportAsPDF } from './utils/exportNote';
 
+function createBlankPage() {
+  return {
+    id: `page-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    content: '',
+    textBoxes: [],
+    images: [],
+    strokes: [],
+    history: [],
+    redoStack: [],
+  };
+}
+
+function normalizeNotebook(nb) {
+  if (Array.isArray(nb.pages) && nb.pages.length > 0) {
+    const safeIndex = Math.min(
+      Math.max(0, nb.activePageIndex || 0),
+      nb.pages.length - 1
+    );
+    return {
+      ...nb,
+      activePageIndex: safeIndex,
+      pages: nb.pages.map((p) => ({
+        ...p,
+        images: p.images || [],
+        textBoxes: p.textBoxes || [],
+        strokes: p.strokes || [],
+      })),
+    };
+  }
+  return {
+    ...nb,
+    activePageIndex: 0,
+    pages: [
+      {
+        id: `page-${nb.id || Date.now()}`,
+        content: nb.content || '',
+        textBoxes: nb.textBoxes || [],
+        images: nb.images || [],
+        strokes: nb.strokes || [],
+        history: nb.history || [],
+        redoStack: nb.redoStack || [],
+      },
+    ],
+  };
+}
+
 const DEFAULT_FOLDERS = [
   {
     id: 'folder-1',
@@ -35,17 +84,12 @@ const DEFAULT_FOLDERS = [
     color: '#6366f1',
     isOpen: true,
     notebooks: [
-      {
+      normalizeNotebook({
         id: 'nb-1',
         title: 'Quick Scratchpad',
         color: '#38bdf8',
-        content: '',
-        textBoxes: [],
-        strokes: [],
-        history: [],
-        redoStack: [],
         updatedAt: Date.now(),
-      },
+      }),
     ],
   },
 ];
@@ -92,6 +136,7 @@ export default function App() {
   const [highlighterSize, setHighlighterSize] = useState(22);
   const [eraserSize, setEraserSize] = useState(24);
   const [confirmClearPage, setConfirmClearPage] = useState(false);
+  const [confirmDeletePage, setConfirmDeletePage] = useState(false);
   const [recentColors, setRecentColors] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('mindvault-recent-colors'));
@@ -104,6 +149,7 @@ export default function App() {
   });
 
   const colorInputRef = useRef(null);
+  const imageInputRef = useRef(null);
 
   // Export & Save dropdown state
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
@@ -173,10 +219,14 @@ export default function App() {
     async function init() {
       const saved = await loadWorkspace();
       if (saved && saved.length > 0) {
-        setFolders(saved);
-        setActiveFolderId(saved[0].id);
-        if (saved[0].notebooks.length > 0) {
-          setActiveNotebookId(saved[0].notebooks[0].id);
+        const normalizedFolders = saved.map((f) => ({
+          ...f,
+          notebooks: (f.notebooks || []).map(normalizeNotebook),
+        }));
+        setFolders(normalizedFolders);
+        setActiveFolderId(normalizedFolders[0].id);
+        if (normalizedFolders[0].notebooks.length > 0) {
+          setActiveNotebookId(normalizedFolders[0].notebooks[0].id);
         }
       }
       setIsLoaded(true);
@@ -244,21 +294,17 @@ export default function App() {
       return remaining;
     });
     setConfirmClearPage(false);
+    setConfirmDeletePage(false);
   };
 
   const handleAddNotebook = (folderId, title) => {
     if (!title?.trim()) return;
-    const newNotebook = {
+    const newNotebook = normalizeNotebook({
       id: `nb-${Date.now()}`,
       title: title.trim(),
       color: '#38bdf8',
-      content: '',
-      textBoxes: [],
-      strokes: [],
-      history: [],
-      redoStack: [],
       updatedAt: Date.now(),
-    };
+    });
     setFolders((prev) =>
       prev.map((f) =>
         f.id === folderId
@@ -269,6 +315,7 @@ export default function App() {
     setActiveFolderId(folderId);
     setActiveNotebookId(newNotebook.id);
     setConfirmClearPage(false);
+    setConfirmDeletePage(false);
   };
 
   const handleRenameNotebook = (folderId, notebookId, newTitle) => {
@@ -316,46 +363,164 @@ export default function App() {
       })
     );
     setConfirmClearPage(false);
+    setConfirmDeletePage(false);
   };
 
   const handleSelectNotebook = (folderId, notebookId) => {
     setActiveFolderId(folderId);
     setActiveNotebookId(notebookId);
     setConfirmClearPage(false);
+    setConfirmDeletePage(false);
   };
 
   const activeFolder = folders.find((f) => f.id === activeFolderId);
-  const activeNotebook = activeFolder?.notebooks.find(
+  const rawActiveNotebook = activeFolder?.notebooks.find(
     (n) => n.id === activeNotebookId
   );
+  const activeNotebook = rawActiveNotebook
+    ? normalizeNotebook(rawActiveNotebook)
+    : null;
 
-  const handleUpdateNotebook = useCallback(
-    (updatedNotebook, recordHistory = true, customPrevSnapshot = null) => {
+  const activePageIndex = activeNotebook ? activeNotebook.activePageIndex : 0;
+  const activePage = activeNotebook ? activeNotebook.pages[activePageIndex] : null;
+  const totalPages = activeNotebook ? activeNotebook.pages.length : 0;
+
+  // Page management: Add, Delete, Next, Previous
+  const handleAddPage = useCallback(() => {
+    if (!activeNotebook) return;
+    const newPage = createBlankPage();
+    const insertIndex = activePageIndex + 1;
+    const updatedPages = [
+      ...activeNotebook.pages.slice(0, insertIndex),
+      newPage,
+      ...activeNotebook.pages.slice(insertIndex),
+    ];
+
+    setFolders((prev) =>
+      prev.map((f) =>
+        f.id === activeFolderId
+          ? {
+              ...f,
+              notebooks: f.notebooks.map((nb) =>
+                nb.id === activeNotebook.id
+                  ? {
+                      ...nb,
+                      pages: updatedPages,
+                      activePageIndex: insertIndex,
+                      updatedAt: Date.now(),
+                    }
+                  : nb
+              ),
+            }
+          : f
+      )
+    );
+    setConfirmClearPage(false);
+    setConfirmDeletePage(false);
+  }, [activeNotebook, activePageIndex, activeFolderId]);
+
+  const handleDeleteCurrentPage = useCallback(() => {
+    if (!activeNotebook || activeNotebook.pages.length <= 1) return;
+    const remainingPages = activeNotebook.pages.filter(
+      (_, idx) => idx !== activePageIndex
+    );
+    const nextIndex = Math.min(activePageIndex, remainingPages.length - 1);
+
+    setFolders((prev) =>
+      prev.map((f) =>
+        f.id === activeFolderId
+          ? {
+              ...f,
+              notebooks: f.notebooks.map((nb) =>
+                nb.id === activeNotebook.id
+                  ? {
+                      ...nb,
+                      pages: remainingPages,
+                      activePageIndex: nextIndex,
+                      updatedAt: Date.now(),
+                    }
+                  : nb
+              ),
+            }
+          : f
+      )
+    );
+    setConfirmDeletePage(false);
+    setConfirmClearPage(false);
+  }, [activeNotebook, activePageIndex, activeFolderId]);
+
+  const handleGoToPage = useCallback(
+    (targetIndex) => {
+      if (!activeNotebook) return;
+      const clamped = Math.min(
+        Math.max(0, targetIndex),
+        activeNotebook.pages.length - 1
+      );
+      if (clamped === activePageIndex) return;
+
+      setFolders((prev) =>
+        prev.map((f) =>
+          f.id === activeFolderId
+            ? {
+                ...f,
+                notebooks: f.notebooks.map((nb) =>
+                  nb.id === activeNotebook.id
+                    ? { ...nb, activePageIndex: clamped }
+                    : nb
+                ),
+              }
+            : f
+        )
+      );
+      setConfirmClearPage(false);
+      setConfirmDeletePage(false);
+    },
+    [activeNotebook, activePageIndex, activeFolderId]
+  );
+
+  // Update active page content/strokes/images with per-page undo history
+  const handleUpdateActivePage = useCallback(
+    (updatedPageData, recordHistory = true, customPrevSnapshot = null) => {
+      if (!activeNotebook) return;
       setFolders((prev) =>
         prev.map((f) => {
           if (f.id !== activeFolderId) return f;
           return {
             ...f,
             notebooks: f.notebooks.map((nb) => {
-              if (nb.id !== updatedNotebook.id) return nb;
+              if (nb.id !== activeNotebook.id) return nb;
+              const normalized = normalizeNotebook(nb);
+              const idx = normalized.activePageIndex;
+              const currentPage = normalized.pages[idx];
 
-              let nextHistory = nb.history || [];
-              let nextRedo = nb.redoStack || [];
+              let nextHistory = currentPage.history || [];
+              let nextRedo = currentPage.redoStack || [];
 
               if (recordHistory) {
                 const snapshot = customPrevSnapshot || {
-                  strokes: nb.strokes || [],
-                  textBoxes: nb.textBoxes || [],
-                  content: nb.content || '',
+                  strokes: currentPage.strokes || [],
+                  textBoxes: currentPage.textBoxes || [],
+                  images: currentPage.images || [],
+                  content: currentPage.content || '',
                 };
                 nextHistory = [...nextHistory.slice(-49), snapshot];
                 nextRedo = [];
               }
 
+              const nextPages = normalized.pages.map((p, pIdx) =>
+                pIdx === idx
+                  ? {
+                      ...p,
+                      ...updatedPageData,
+                      history: nextHistory,
+                      redoStack: nextRedo,
+                    }
+                  : p
+              );
+
               return {
-                ...updatedNotebook,
-                history: nextHistory,
-                redoStack: nextRedo,
+                ...normalized,
+                pages: nextPages,
                 updatedAt: Date.now(),
               };
             }),
@@ -363,19 +528,84 @@ export default function App() {
         })
       );
     },
-    [activeFolderId]
+    [activeNotebook, activeFolderId]
   );
 
-  const handleUndo = useCallback(() => {
+  // Insert an uploaded, dropped, or pasted image file into the active page
+  const handleInsertImageFile = useCallback(
+    (file, x = 80, y = 80) => {
+      if (!activePage || !file || !file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result;
+        const imgEl = new Image();
+        imgEl.onload = () => {
+          const maxInitialWidth = 380;
+          const naturalW = imgEl.naturalWidth || 300;
+          const naturalH = imgEl.naturalHeight || 220;
+          const scale = naturalW > maxInitialWidth ? maxInitialWidth / naturalW : 1;
+          const width = Math.round(naturalW * scale);
+          const height = Math.round(naturalH * scale);
+
+          const newImage = {
+            id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            src: dataUrl,
+            name: file.name || 'image',
+            x,
+            y,
+            width,
+            height,
+          };
+
+          handleUpdateActivePage({
+            ...activePage,
+            images: [...(activePage.images || []), newImage],
+          });
+        };
+        imgEl.src = dataUrl;
+      };
+      reader.readAsDataURL(file);
+    },
+    [activePage, handleUpdateActivePage]
+  );
+
+  const handleImageInputChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    files.forEach((file, idx) => {
+      handleInsertImageFile(file, 80 + idx * 24, 80 + idx * 24);
+    });
+    e.target.value = '';
+  };
+
+  const handleUpdateNotebookTitle = (newTitle) => {
     if (!activeNotebook) return;
-    const history = activeNotebook.history || [];
+    setFolders((prev) =>
+      prev.map((f) =>
+        f.id === activeFolderId
+          ? {
+              ...f,
+              notebooks: f.notebooks.map((nb) =>
+                nb.id === activeNotebook.id
+                  ? { ...nb, title: newTitle, updatedAt: Date.now() }
+                  : nb
+              ),
+            }
+          : f
+      )
+    );
+  };
+
+  const handleUndo = useCallback(() => {
+    if (!activeNotebook || !activePage) return;
+    const history = activePage.history || [];
     if (history.length === 0) return;
 
     const previousState = history[history.length - 1];
     const currentSnapshot = {
-      strokes: activeNotebook.strokes || [],
-      textBoxes: activeNotebook.textBoxes || [],
-      content: activeNotebook.content || '',
+      strokes: activePage.strokes || [],
+      textBoxes: activePage.textBoxes || [],
+      images: activePage.images || [],
+      content: activePage.content || '',
     };
 
     setFolders((prev) =>
@@ -383,35 +613,42 @@ export default function App() {
         f.id === activeFolderId
           ? {
               ...f,
-              notebooks: f.notebooks.map((nb) =>
-                nb.id === activeNotebook.id
-                  ? {
-                      ...nb,
-                      strokes: previousState.strokes,
-                      textBoxes: previousState.textBoxes,
-                      content: previousState.content || '',
-                      history: history.slice(0, -1),
-                      redoStack: [...(nb.redoStack || []), currentSnapshot],
-                      updatedAt: Date.now(),
-                    }
-                  : nb
-              ),
+              notebooks: f.notebooks.map((nb) => {
+                if (nb.id !== activeNotebook.id) return nb;
+                const normalized = normalizeNotebook(nb);
+                const idx = normalized.activePageIndex;
+                const nextPages = normalized.pages.map((p, pIdx) =>
+                  pIdx === idx
+                    ? {
+                        ...p,
+                        strokes: previousState.strokes,
+                        textBoxes: previousState.textBoxes,
+                        images: previousState.images || [],
+                        content: previousState.content || '',
+                        history: history.slice(0, -1),
+                        redoStack: [...(p.redoStack || []), currentSnapshot],
+                      }
+                    : p
+                );
+                return { ...normalized, pages: nextPages, updatedAt: Date.now() };
+              }),
             }
           : f
       )
     );
-  }, [activeNotebook, activeFolderId]);
+  }, [activeNotebook, activePage, activeFolderId]);
 
   const handleRedo = useCallback(() => {
-    if (!activeNotebook) return;
-    const redoStack = activeNotebook.redoStack || [];
+    if (!activeNotebook || !activePage) return;
+    const redoStack = activePage.redoStack || [];
     if (redoStack.length === 0) return;
 
     const nextState = redoStack[redoStack.length - 1];
     const currentSnapshot = {
-      strokes: activeNotebook.strokes || [],
-      textBoxes: activeNotebook.textBoxes || [],
-      content: activeNotebook.content || '',
+      strokes: activePage.strokes || [],
+      textBoxes: activePage.textBoxes || [],
+      images: activePage.images || [],
+      content: activePage.content || '',
     };
 
     setFolders((prev) =>
@@ -419,51 +656,73 @@ export default function App() {
         f.id === activeFolderId
           ? {
               ...f,
-              notebooks: f.notebooks.map((nb) =>
-                nb.id === activeNotebook.id
-                  ? {
-                      ...nb,
-                      strokes: nextState.strokes,
-                      textBoxes: nextState.textBoxes,
-                      content: nextState.content || '',
-                      history: [...(nb.history || []), currentSnapshot],
-                      redoStack: redoStack.slice(0, -1),
-                      updatedAt: Date.now(),
-                    }
-                  : nb
-              ),
+              notebooks: f.notebooks.map((nb) => {
+                if (nb.id !== activeNotebook.id) return nb;
+                const normalized = normalizeNotebook(nb);
+                const idx = normalized.activePageIndex;
+                const nextPages = normalized.pages.map((p, pIdx) =>
+                  pIdx === idx
+                    ? {
+                        ...p,
+                        strokes: nextState.strokes,
+                        textBoxes: nextState.textBoxes,
+                        images: nextState.images || [],
+                        content: nextState.content || '',
+                        history: [...(p.history || []), currentSnapshot],
+                        redoStack: redoStack.slice(0, -1),
+                      }
+                    : p
+                );
+                return { ...normalized, pages: nextPages, updatedAt: Date.now() };
+              }),
             }
           : f
       )
     );
-  }, [activeNotebook, activeFolderId]);
+  }, [activeNotebook, activePage, activeFolderId]);
 
-  const handleClearEntireNote = () => {
-    if (!activeNotebook) return;
-    handleUpdateNotebook({
-      ...activeNotebook,
+  const handleClearCurrentPage = () => {
+    if (!activePage) return;
+    handleUpdateActivePage({
       content: '',
       textBoxes: [],
+      images: [],
       strokes: [],
     });
     setConfirmClearPage(false);
   };
 
-  // Global Keyboard Shortcuts:
-  // Cmd/Ctrl + Shift + F = Pen
-  // Cmd/Ctrl + H = Highlighter, E = Eraser, R = Color Picker, S = Selection, T = Typing, Z = Undo, X = Redo
+  // Global Keyboard Shortcuts & Left/Right Arrow Page Navigation
   useEffect(() => {
     const handleKeyDown = (e) => {
-      const isMod = e.metaKey || e.ctrlKey;
-      if (!isMod || e.altKey) return;
-
       const activeTag = document.activeElement?.tagName;
-      if (activeTag === 'INPUT') {
-        if (e.key === 'Escape') document.activeElement.blur();
+      const isEditingText = activeTag === 'INPUT' || activeTag === 'TEXTAREA';
+
+      if (isEditingText) {
+        if (e.key === 'Escape') {
+          document.activeElement.blur();
+        }
         return;
       }
 
       if (!activeNotebook) return;
+
+      // Left & Right Arrow keys to switch between pages
+      if (!e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          handleGoToPage(activePageIndex - 1);
+          return;
+        }
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          handleGoToPage(activePageIndex + 1);
+          return;
+        }
+      }
+
+      const isMod = e.metaKey || e.ctrlKey;
+      if (!isMod || e.altKey) return;
 
       const key = e.key.toLowerCase();
 
@@ -506,15 +765,22 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeNotebook, drawTool, handleUndo, handleRedo]);
+  }, [
+    activeNotebook,
+    activePageIndex,
+    drawTool,
+    handleGoToPage,
+    handleUndo,
+    handleRedo,
+  ]);
 
   const isDark = theme === 'dark';
 
   const getDisplaySwatch = (color) =>
     isDark && color.toLowerCase() === '#0f172a' ? '#f8fafc' : color;
 
-  const canUndo = (activeNotebook?.history?.length || 0) > 0;
-  const canRedo = (activeNotebook?.redoStack?.length || 0) > 0;
+  const canUndo = (activePage?.history?.length || 0) > 0;
+  const canRedo = (activePage?.redoStack?.length || 0) > 0;
 
   const activeColorValue = drawTool === 'highlighter' ? highlighterColor : penColor;
   const setActiveColorValue =
@@ -526,11 +792,12 @@ export default function App() {
         isDark ? 'bg-slate-900 text-slate-100' : 'bg-white text-slate-900'
       }`}
     >
-      {/* Responsive Theme-Synced Sidebar */}
+      {/* Responsive Theme-Synced Sidebar with Settings Icon Dropdown */}
       <Sidebar
         isOpen={isSidebarOpen}
         width={sidebarWidth}
         theme={theme}
+        onThemeChange={handleThemeChange}
         onStartResize={startResizingSidebar}
         onClose={() => setIsSidebarOpen(false)}
         folders={folders}
@@ -558,7 +825,7 @@ export default function App() {
           }`}
         >
           {/* Row 1 Left: Sidebar Toggle, Color Tag & Editable Active Title */}
-          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 max-w-[180px] sm:max-w-[230px]">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 max-w-[170px] sm:max-w-[210px]">
             {!isSidebarOpen && (
               <button
                 onClick={() => setIsSidebarOpen(true)}
@@ -593,12 +860,7 @@ export default function App() {
                 <input
                   type="text"
                   value={activeNotebook.title}
-                  onChange={(e) =>
-                    handleUpdateNotebook({
-                      ...activeNotebook,
-                      title: e.target.value,
-                    })
-                  }
+                  onChange={(e) => handleUpdateNotebookTitle(e.target.value)}
                   title="Click to edit notebook title"
                   className={`font-semibold text-sm sm:text-base bg-transparent px-1.5 py-1 rounded border border-transparent focus:border-indigo-500 focus:outline-none truncate w-full transition-colors duration-200 ${
                     isDark
@@ -614,42 +876,106 @@ export default function App() {
             )}
           </div>
 
-          {/* Row 1 Right: Light / Dark Buttons, Clear & Export */}
+          {/* Row 1 Right: Page Controls, Clear & Export */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 order-2 lg:order-3">
-            {/* Light & Dark Theme Buttons */}
-            <div
-              className={`flex items-center p-0.5 sm:p-1 rounded-lg border transition-colors duration-200 ${
-                isDark
-                  ? 'bg-slate-900 border-slate-800'
-                  : 'bg-slate-100 border-slate-200'
-              }`}
-              title="Switch Theme"
-            >
-              <button
-                type="button"
-                onClick={() => handleThemeChange('light')}
-                title="Light Theme"
-                className={`p-1.5 rounded-md transition-colors duration-200 ${
-                  !isDark
-                    ? 'bg-white text-amber-500 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Sun size={14} />
-              </button>
-              <button
-                type="button"
-                onClick={() => handleThemeChange('dark')}
-                title="Dark Theme"
-                className={`p-1.5 rounded-md transition-colors duration-200 ${
+            {/* Multi-Page Navigation, Add Page & Delete Page Controls */}
+            {activeNotebook && (
+              <div
+                className={`flex items-center gap-0.5 p-0.5 sm:p-1 rounded-lg border transition-colors duration-200 ${
                   isDark
-                    ? 'bg-slate-800 text-indigo-400 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-slate-900 border-slate-800 text-slate-200'
+                    : 'bg-slate-100 border-slate-200 text-slate-700'
                 }`}
               >
-                <Moon size={14} />
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => handleGoToPage(activePageIndex - 1)}
+                  disabled={activePageIndex <= 0}
+                  title="Previous Page (← Left Arrow)"
+                  className={`p-1 rounded transition disabled:opacity-30 ${
+                    isDark ? 'hover:bg-slate-800' : 'hover:bg-white'
+                  }`}
+                >
+                  <ChevronLeft size={14} />
+                </button>
+
+                <span
+                  className="px-1.5 text-xs font-medium tabular-nums select-none"
+                  title="Use Left / Right Arrow keys to flip pages"
+                >
+                  {activePageIndex + 1}/{totalPages}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => handleGoToPage(activePageIndex + 1)}
+                  disabled={activePageIndex >= totalPages - 1}
+                  title="Next Page (→ Right Arrow)"
+                  className={`p-1 rounded transition disabled:opacity-30 ${
+                    isDark ? 'hover:bg-slate-800' : 'hover:bg-white'
+                  }`}
+                >
+                  <ChevronRight size={14} />
+                </button>
+
+                <div
+                  className={`h-4 w-px mx-0.5 ${
+                    isDark ? 'bg-slate-800' : 'bg-slate-300'
+                  }`}
+                />
+
+                <button
+                  type="button"
+                  onClick={handleAddPage}
+                  title="Add New Page"
+                  className={`p-1 rounded transition ${
+                    isDark
+                      ? 'text-indigo-400 hover:bg-slate-800'
+                      : 'text-indigo-600 hover:bg-white'
+                  }`}
+                >
+                  <FilePlus2 size={14} />
+                </button>
+
+                {totalPages > 1 && (
+                  <>
+                    {confirmDeletePage ? (
+                      <div className="flex items-center gap-1 bg-red-600 text-white px-1.5 py-0.5 rounded text-[11px] font-medium">
+                        <span>Del?</span>
+                        <button
+                          type="button"
+                          onClick={handleDeleteCurrentPage}
+                          className="underline font-bold"
+                        >
+                          Yes
+                        </button>
+                        <span>/</span>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeletePage(false)}
+                          className="underline"
+                        >
+                          No
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeletePage(true)}
+                        title="Delete Current Page"
+                        className={`p-1 rounded transition ${
+                          isDark
+                            ? 'text-red-400 hover:bg-red-950/60'
+                            : 'text-red-600 hover:bg-red-50'
+                        }`}
+                      >
+                        <FileX2 size={14} />
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
             {activeNotebook && (
               <>
@@ -657,7 +983,7 @@ export default function App() {
                   <div className="flex items-center gap-1 bg-red-600 text-white px-2 py-1.5 rounded-lg text-xs font-medium">
                     <span className="hidden sm:inline">Clear?</span>
                     <button
-                      onClick={handleClearEntireNote}
+                      onClick={handleClearCurrentPage}
                       className="underline font-bold hover:text-red-100"
                     >
                       Yes
@@ -673,7 +999,7 @@ export default function App() {
                 ) : (
                   <button
                     onClick={() => setConfirmClearPage(true)}
-                    title="Clear entire page (text and ink)"
+                    title="Clear current page (text, images, and ink)"
                     className={`flex items-center gap-1 p-2 sm:px-2.5 sm:py-1.5 text-sm font-medium rounded-lg border transition-colors duration-200 ${
                       isDark
                         ? 'bg-slate-900 hover:bg-red-950/60 text-red-400 border-slate-800 hover:border-red-800'
@@ -681,7 +1007,7 @@ export default function App() {
                     }`}
                   >
                     <Trash2 size={14} />
-                    <span className="hidden sm:inline">Clear</span>
+                    <span className="hidden md:inline">Clear</span>
                   </button>
                 )}
               </>
@@ -705,7 +1031,7 @@ export default function App() {
 
               {isExportMenuOpen && (
                 <div
-                  className={`absolute right-0 mt-2 w-48 rounded-xl shadow-lg border py-1.5 z-50 transition-colors duration-200 ${
+                  className={`absolute right-0 mt-2 w-52 rounded-xl shadow-lg border py-1.5 z-50 transition-colors duration-200 ${
                     isDark
                       ? 'bg-slate-900 border-slate-800 text-slate-200'
                       : 'bg-white border-slate-200 text-slate-700'
@@ -744,7 +1070,7 @@ export default function App() {
                         }`}
                       >
                         <FileImage size={15} className="text-sky-500" />
-                        <span>Export as PNG</span>
+                        <span>Export Page as PNG</span>
                       </button>
 
                       <button
@@ -757,7 +1083,9 @@ export default function App() {
                         }`}
                       >
                         <FileText size={15} className="text-rose-500" />
-                        <span>Export as PDF</span>
+                        <span>
+                          Export {totalPages > 1 ? `All ${totalPages} Pages` : 'as'} PDF
+                        </span>
                       </button>
                     </>
                   )}
@@ -766,7 +1094,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Center / Row 2: Mode Switcher, Draw Tools, Undo/Redo */}
+          {/* Center / Row 2: Mode Switcher, Add Image, Draw Tools, Undo/Redo */}
           {activeNotebook && (
             <div
               className={`w-full lg:w-auto order-3 lg:order-2 flex flex-wrap items-center justify-center gap-2 pt-1 lg:pt-0 border-t lg:border-t-0 transition-colors duration-200 ${
@@ -808,6 +1136,29 @@ export default function App() {
                   );
                 })}
               </div>
+
+              {/* Add Image Button (also supports Drag & Drop or Cmd/Ctrl + V paste) */}
+              <button
+                type="button"
+                onClick={() => imageInputRef.current?.click()}
+                title="Insert Image (or drag & drop / paste onto page)"
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs sm:text-sm font-medium transition-colors duration-200 ${
+                  isDark
+                    ? 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white'
+                    : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200/70'
+                }`}
+              >
+                <ImagePlus size={14} className="text-indigo-500" />
+                <span className="hidden sm:inline">Image</span>
+              </button>
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleImageInputChange}
+                className="sr-only"
+              />
 
               {mode === 'draw' && (
                 <div
@@ -975,10 +1326,10 @@ export default function App() {
           )}
         </header>
 
-        {/* Note Editor Canvas */}
-        {activeNotebook ? (
+        {/* Note Editor Canvas bound to Active Page */}
+        {activeNotebook && activePage ? (
           <NoteEditor
-            notebook={activeNotebook}
+            notebook={activePage}
             mode={mode}
             drawTool={drawTool}
             penColor={penColor}
@@ -987,8 +1338,9 @@ export default function App() {
             highlighterSize={highlighterSize}
             eraserSize={eraserSize}
             theme={theme}
-            onUpdate={handleUpdateNotebook}
+            onUpdate={handleUpdateActivePage}
             onStrokeCommit={recordRecentColor}
+            onInsertImageFile={handleInsertImageFile}
           />
         ) : (
           <div className="flex-1 flex items-center justify-center p-4 text-center opacity-60 bg-transparent">

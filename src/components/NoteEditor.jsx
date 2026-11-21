@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { GripHorizontal, X } from 'lucide-react';
+import { GripHorizontal, X, Maximize2 } from 'lucide-react';
 
 const TEXT_COLOR_PRESETS = [
   { id: 'default', label: 'Theme Default', value: '' },
@@ -71,6 +71,10 @@ function getTextBoxBounds(box) {
   return { x: box.x, y: box.y, w, h };
 }
 
+function getImageBounds(img) {
+  return { x: img.x, y: img.y, w: img.width || 240, h: img.height || 180 };
+}
+
 function boxesIntersect(a, b) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
@@ -106,6 +110,7 @@ export function NoteEditor({
   theme = 'light',
   onUpdate,
   onStrokeCommit,
+  onInsertImageFile,
 }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -118,8 +123,16 @@ export function NoteEditor({
   const [activeBoxId, setActiveBoxId] = useState(null);
   const [draggingBox, setDraggingBox] = useState(null);
 
+  // Image states
+  const [activeImageId, setActiveImageId] = useState(null);
+  const [draggingImage, setDraggingImage] = useState(null);
+  const [resizingImage, setResizingImage] = useState(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  // Selection states
   const [selectedStrokeIndices, setSelectedStrokeIndices] = useState([]);
   const [selectedBoxIds, setSelectedBoxIds] = useState([]);
+  const [selectedImageIds, setSelectedImageIds] = useState([]);
   const [marquee, setMarquee] = useState(null);
   const [selectionDrag, setSelectionDrag] = useState(null);
 
@@ -132,6 +145,7 @@ export function NoteEditor({
       : []);
 
   const strokes = notebook.strokes || [];
+  const images = notebook.images || [];
 
   useEffect(() => {
     const el = containerRef.current;
@@ -152,6 +166,11 @@ export function NoteEditor({
         if (b.x + b.w > maxStrokeX) maxStrokeX = b.x + b.w + 100;
         if (b.y + b.h > maxStrokeY) maxStrokeY = b.y + b.h + 100;
       }
+      for (const img of images) {
+        const b = getImageBounds(img);
+        if (b.x + b.w > maxStrokeX) maxStrokeX = b.x + b.w + 100;
+        if (b.y + b.h > maxStrokeY) maxStrokeY = b.y + b.h + 100;
+      }
 
       const nextW = Math.max(1200, el.clientWidth, Math.ceil(maxStrokeX));
       const nextH = Math.max(1200, el.clientHeight, Math.ceil(maxStrokeY));
@@ -165,40 +184,88 @@ export function NoteEditor({
     const observer = new ResizeObserver(updateSize);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [strokes, textBoxes]);
+  }, [strokes, textBoxes, images]);
 
   useEffect(() => {
     setSelectedStrokeIndices([]);
     setSelectedBoxIds([]);
+    setSelectedImageIds([]);
     setMarquee(null);
     setSelectionDrag(null);
   }, [notebook.id, mode]);
 
+  // Delete selected strokes, text boxes, or images
   useEffect(() => {
-    if (mode !== 'select') return;
     const handleKeyDown = (e) => {
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (
-        (e.key === 'Backspace' || e.key === 'Delete') &&
-        (selectedStrokeIndices.length > 0 || selectedBoxIds.length > 0)
-      ) {
-        e.preventDefault();
-        const nextStrokes = strokes.filter((_, idx) => !selectedStrokeIndices.includes(idx));
-        const nextBoxes = textBoxes.filter((b) => !selectedBoxIds.includes(b.id));
-        onUpdate({
-          ...notebook,
-          strokes: nextStrokes,
-          textBoxes: nextBoxes,
-          content: '',
-        });
-        setSelectedStrokeIndices([]);
-        setSelectedBoxIds([]);
+
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        if (
+          mode === 'select' &&
+          (selectedStrokeIndices.length > 0 ||
+            selectedBoxIds.length > 0 ||
+            selectedImageIds.length > 0)
+        ) {
+          e.preventDefault();
+          const nextStrokes = strokes.filter((_, idx) => !selectedStrokeIndices.includes(idx));
+          const nextBoxes = textBoxes.filter((b) => !selectedBoxIds.includes(b.id));
+          const nextImages = images.filter((img) => !selectedImageIds.includes(img.id));
+          onUpdate({
+            ...notebook,
+            strokes: nextStrokes,
+            textBoxes: nextBoxes,
+            images: nextImages,
+            content: '',
+          });
+          setSelectedStrokeIndices([]);
+          setSelectedBoxIds([]);
+          setSelectedImageIds([]);
+        } else if (activeImageId) {
+          e.preventDefault();
+          const nextImages = images.filter((img) => img.id !== activeImageId);
+          onUpdate({ ...notebook, images: nextImages });
+          setActiveImageId(null);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [mode, selectedStrokeIndices, selectedBoxIds, strokes, textBoxes, notebook, onUpdate]);
+  }, [
+    mode,
+    selectedStrokeIndices,
+    selectedBoxIds,
+    selectedImageIds,
+    activeImageId,
+    strokes,
+    textBoxes,
+    images,
+    notebook,
+    onUpdate,
+  ]);
+
+  // Paste image directly from clipboard (Cmd/Ctrl + V)
+  useEffect(() => {
+    const handlePaste = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items || !onInsertImageFile) return;
+
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            const scrollX = containerRef.current?.scrollLeft || 0;
+            const scrollY = containerRef.current?.scrollTop || 0;
+            onInsertImageFile(file, scrollX + 60, scrollY + 60);
+            break;
+          }
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [onInsertImageFile]);
 
   const getDisplayColor = useCallback(
     (color) => {
@@ -351,6 +418,7 @@ export function NoteEditor({
     redrawCanvas();
   }, [redrawCanvas, boardSize.width, boardSize.height]);
 
+  // Dragging Text Boxes
   useEffect(() => {
     if (!draggingBox) return;
 
@@ -384,7 +452,130 @@ export function NoteEditor({
     };
   }, [draggingBox, textBoxes, notebook, onUpdate]);
 
+  // Dragging Images
+  useEffect(() => {
+    if (!draggingImage) return;
+
+    const handleWindowPointerMove = (e) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const newX = Math.max(
+        8,
+        e.clientX - rect.left + containerRef.current.scrollLeft - draggingImage.offsetX
+      );
+      const newY = Math.max(
+        8,
+        e.clientY - rect.top + containerRef.current.scrollTop - draggingImage.offsetY
+      );
+
+      const updatedImages = images.map((img) =>
+        img.id === draggingImage.id ? { ...img, x: newX, y: newY } : img
+      );
+      onUpdate({ ...notebook, images: updatedImages }, false);
+    };
+
+    const handleWindowPointerUp = () => {
+      if (draggingImage.snapshotImages) {
+        onUpdate(
+          { ...notebook, images },
+          true,
+          {
+            strokes,
+            textBoxes,
+            images: draggingImage.snapshotImages,
+            content: notebook.content || '',
+          }
+        );
+      }
+      setDraggingImage(null);
+    };
+
+    window.addEventListener('pointermove', handleWindowPointerMove);
+    window.addEventListener('pointerup', handleWindowPointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handleWindowPointerMove);
+      window.removeEventListener('pointerup', handleWindowPointerUp);
+    };
+  }, [draggingImage, images, strokes, textBoxes, notebook, onUpdate]);
+
+  // Resizing Images (Aspect-Ratio Locked via Bottom-Right Handle)
+  useEffect(() => {
+    if (!resizingImage) return;
+
+    const handleWindowPointerMove = (e) => {
+      const dx = e.clientX - resizingImage.startX;
+      const nextWidth = Math.max(60, Math.min(1400, resizingImage.startWidth + dx));
+      const nextHeight = Math.round(nextWidth / resizingImage.aspectRatio);
+
+      const updatedImages = images.map((img) =>
+        img.id === resizingImage.id
+          ? { ...img, width: nextWidth, height: nextHeight }
+          : img
+      );
+      onUpdate({ ...notebook, images: updatedImages }, false);
+    };
+
+    const handleWindowPointerUp = () => {
+      onUpdate(
+        { ...notebook, images },
+        true,
+        {
+          strokes,
+          textBoxes,
+          images: resizingImage.snapshotImages,
+          content: notebook.content || '',
+        }
+      );
+      setResizingImage(null);
+    };
+
+    window.addEventListener('pointermove', handleWindowPointerMove);
+    window.addEventListener('pointerup', handleWindowPointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handleWindowPointerMove);
+      window.removeEventListener('pointerup', handleWindowPointerUp);
+    };
+  }, [resizingImage, images, strokes, textBoxes, notebook, onUpdate]);
+
+  // Drag-and-Drop Image Handlers
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer?.types?.includes('Files')) {
+      setIsDragOver(true);
+    }
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.currentTarget === e.target) {
+      setIsDragOver(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+
+    const files = Array.from(e.dataTransfer?.files || []);
+    const imageFiles = files.filter((f) => f.type.startsWith('image/'));
+    if (imageFiles.length === 0 || !onInsertImageFile) return;
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const dropX = Math.max(16, e.clientX - rect.left + containerRef.current.scrollLeft);
+    const dropY = Math.max(16, e.clientY - rect.top + containerRef.current.scrollTop);
+
+    imageFiles.forEach((file, index) => {
+      onInsertImageFile(file, dropX + index * 24, dropY + index * 24);
+    });
+  };
+
   const handleCanvasAreaClick = (e) => {
+    if (e.target.closest('[data-imagebox="true"]')) return;
+    setActiveImageId(null);
+
     if (mode !== 'type') return;
     if (e.target.closest('[data-textbox="true"]')) return;
 
@@ -456,6 +647,41 @@ export function NoteEditor({
     setActiveBoxId(box.id);
   };
 
+  const startDraggingImage = (e, img) => {
+    e.stopPropagation();
+    const rect = containerRef.current.getBoundingClientRect();
+    const pointerX = e.clientX - rect.left + containerRef.current.scrollLeft;
+    const pointerY = e.clientY - rect.top + containerRef.current.scrollTop;
+    setDraggingImage({
+      id: img.id,
+      offsetX: pointerX - img.x,
+      offsetY: pointerY - img.y,
+      snapshotImages: images,
+    });
+    setActiveImageId(img.id);
+  };
+
+  const startResizingImage = (e, img) => {
+    e.stopPropagation();
+    const w = img.width || 240;
+    const h = img.height || 180;
+    setResizingImage({
+      id: img.id,
+      startX: e.clientX,
+      startWidth: w,
+      aspectRatio: w / (h || 1),
+      snapshotImages: images,
+    });
+    setActiveImageId(img.id);
+  };
+
+  const handleDeleteImage = (e, id) => {
+    e.stopPropagation();
+    const remaining = images.filter((img) => img.id !== id);
+    onUpdate({ ...notebook, images: remaining });
+    if (activeImageId === id) setActiveImageId(null);
+  };
+
   const getSelectionGroupBounds = () => {
     const rects = [];
     selectedStrokeIndices.forEach((idx) => {
@@ -467,6 +693,10 @@ export function NoteEditor({
     selectedBoxIds.forEach((id) => {
       const box = textBoxes.find((b) => b.id === id);
       if (box) rects.push(getTextBoxBounds(box));
+    });
+    selectedImageIds.forEach((id) => {
+      const img = images.find((im) => im.id === id);
+      if (img) rects.push(getImageBounds(img));
     });
     if (rects.length === 0) return null;
 
@@ -493,38 +723,65 @@ export function NoteEditor({
           lastY: y,
           snapshotStrokes: strokes,
           snapshotBoxes: textBoxes,
+          snapshotImages: images,
           moved: false,
         });
         return;
       }
 
-      for (let i = textBoxes.length - 1; i >= 0; i--) {
-        const box = textBoxes[i];
-        if (pointInBox(x, y, getTextBoxBounds(box))) {
-          setSelectedBoxIds([box.id]);
+      // Check Images
+      for (let i = images.length - 1; i >= 0; i--) {
+        const img = images[i];
+        if (pointInBox(x, y, getImageBounds(img))) {
+          setSelectedImageIds([img.id]);
+          setSelectedBoxIds([]);
           setSelectedStrokeIndices([]);
+          setActiveImageId(img.id);
           setSelectionDrag({
             lastX: x,
             lastY: y,
             snapshotStrokes: strokes,
             snapshotBoxes: textBoxes,
+            snapshotImages: images,
             moved: false,
           });
           return;
         }
       }
 
+      // Check Text Boxes
+      for (let i = textBoxes.length - 1; i >= 0; i--) {
+        const box = textBoxes[i];
+        if (pointInBox(x, y, getTextBoxBounds(box))) {
+          setSelectedBoxIds([box.id]);
+          setSelectedStrokeIndices([]);
+          setSelectedImageIds([]);
+          setSelectionDrag({
+            lastX: x,
+            lastY: y,
+            snapshotStrokes: strokes,
+            snapshotBoxes: textBoxes,
+            snapshotImages: images,
+            moved: false,
+          });
+          return;
+        }
+      }
+
+      // Check Strokes
       for (let i = strokes.length - 1; i >= 0; i--) {
         if ((strokes[i].tool || 'pen') === 'eraser') continue;
         const b = getStrokeBounds(strokes[i]);
         if (b && pointInBox(x, y, b)) {
           setSelectedStrokeIndices([i]);
           setSelectedBoxIds([]);
+          setSelectedImageIds([]);
           setSelectionDrag({
             lastX: x,
             lastY: y,
             snapshotStrokes: strokes,
             snapshotBoxes: textBoxes,
+            snapshotImages: images,
             moved: false,
           });
           return;
@@ -533,6 +790,8 @@ export function NoteEditor({
 
       setSelectedStrokeIndices([]);
       setSelectedBoxIds([]);
+      setSelectedImageIds([]);
+      setActiveImageId(null);
       setMarquee({ startX: x, startY: y, endX: x, endY: y });
       return;
     }
@@ -592,9 +851,17 @@ export function NoteEditor({
             ? { ...box, x: Math.max(8, box.x + dx), y: Math.max(8, box.y + dy) }
             : box
         );
+        const nextImages = images.map((img) =>
+          selectedImageIds.includes(img.id)
+            ? { ...img, x: Math.max(8, img.x + dx), y: Math.max(8, img.y + dy) }
+            : img
+        );
 
         setSelectionDrag((prev) => ({ ...prev, lastX: x, lastY: y, moved: true }));
-        onUpdate({ ...notebook, strokes: nextStrokes, textBoxes: nextBoxes, content: '' }, false);
+        onUpdate(
+          { ...notebook, strokes: nextStrokes, textBoxes: nextBoxes, images: nextImages, content: '' },
+          false
+        );
         return;
       }
 
@@ -633,7 +900,6 @@ export function NoteEditor({
       ctx.restore();
     } else if (currentItem.current.tool === 'highlighter') {
       currentItem.current.points.push({ x, y });
-      // Redraw full stroke as a single translucent pass to avoid dark overlaps
       redrawCanvas(currentItem.current);
     } else if (currentItem.current.tool === 'eraser') {
       const point = { x, y };
@@ -663,9 +929,13 @@ export function NoteEditor({
       if (selectionDrag) {
         if (selectionDrag.moved) {
           onUpdate(
-            { ...notebook, strokes, textBoxes, content: '' },
+            { ...notebook, strokes, textBoxes, images, content: '' },
             true,
-            { strokes: selectionDrag.snapshotStrokes, textBoxes: selectionDrag.snapshotBoxes }
+            {
+              strokes: selectionDrag.snapshotStrokes,
+              textBoxes: selectionDrag.snapshotBoxes,
+              images: selectionDrag.snapshotImages,
+            }
           );
         }
         setSelectionDrag(null);
@@ -692,8 +962,14 @@ export function NoteEditor({
             if (boxesIntersect(selRect, getTextBoxBounds(box))) hitBoxes.push(box.id);
           });
 
+          const hitImages = [];
+          images.forEach((img) => {
+            if (boxesIntersect(selRect, getImageBounds(img))) hitImages.push(img.id);
+          });
+
           setSelectedStrokeIndices(hitStrokes);
           setSelectedBoxIds(hitBoxes);
+          setSelectedImageIds(hitImages);
         }
         setMarquee(null);
       }
@@ -734,19 +1010,126 @@ export function NoteEditor({
     <div
       ref={containerRef}
       onClick={handleCanvasAreaClick}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       className={`relative flex-1 overflow-auto bg-transparent ${
         mode === 'type' ? 'cursor-text' : ''
       } ${isDark ? 'text-slate-100' : 'text-slate-800'}`}
     >
+      {/* Drag-and-Drop Overlay Indicator */}
+      {isDragOver && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-indigo-600/15 backdrop-blur-[1px] border-4 border-dashed border-indigo-500 m-3 rounded-2xl">
+          <div
+            className={`px-6 py-4 rounded-xl shadow-xl font-semibold text-base ${
+              isDark ? 'bg-slate-900 text-indigo-300' : 'bg-white text-indigo-600'
+            }`}
+          >
+            Drop image anywhere on the page
+          </div>
+        </div>
+      )}
+
       <div
         style={{ width: `${boardSize.width}px`, height: `${boardSize.height}px` }}
         className="relative"
       >
-        {textBoxes.length === 0 && mode === 'type' && (
+        {textBoxes.length === 0 && images.length === 0 && mode === 'type' && (
           <div className="pointer-events-none select-none p-10 text-sm opacity-40">
-            Click anywhere on the page to start typing...
+            Click anywhere to type, or drag &amp; drop / paste an image...
           </div>
         )}
+
+        {/* Floating Resizable Images Layer (renders beneath ink so you can annotate over images) */}
+        {images.map((img) => {
+          const isSelected =
+            activeImageId === img.id || selectedImageIds.includes(img.id);
+          const canInteractWithImage = mode === 'type' || mode === 'select';
+
+          return (
+            <div
+              key={img.id}
+              data-imagebox="true"
+              style={{
+                left: `${img.x}px`,
+                top: `${img.y}px`,
+                width: `${img.width}px`,
+                height: `${img.height}px`,
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (canInteractWithImage) setActiveImageId(img.id);
+              }}
+              className={`absolute group rounded-lg select-none ${
+                canInteractWithImage ? 'pointer-events-auto' : 'pointer-events-none'
+              } ${
+                isSelected
+                  ? 'ring-2 ring-indigo-500 z-12'
+                  : 'hover:ring-1 hover:ring-indigo-400/60 z-5'
+              }`}
+            >
+              <img
+                src={img.src}
+                alt={img.name || 'Note attachment'}
+                draggable={false}
+                onPointerDown={(e) => {
+                  if (canInteractWithImage) startDraggingImage(e, img);
+                }}
+                className={`w-full h-full object-contain rounded-lg block ${
+                  canInteractWithImage ? 'cursor-grab active:cursor-grabbing' : ''
+                }`}
+              />
+
+              {/* Top Move & Delete Controls */}
+              {canInteractWithImage && (
+                <div
+                  className={`absolute -top-7 left-0 right-0 flex items-center justify-between px-1.5 py-0.5 rounded-t-md text-xs transition-opacity ${
+                    isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                  } ${
+                    isDark
+                      ? 'bg-slate-800/95 text-slate-300'
+                      : 'bg-slate-200/95 text-slate-700'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onPointerDown={(e) => startDraggingImage(e, img)}
+                    title="Drag to move image"
+                    className="cursor-grab active:cursor-grabbing p-0.5 hover:text-indigo-500 flex items-center gap-1"
+                  >
+                    <GripHorizontal size={13} />
+                    <span className="text-[10px] font-mono opacity-75">
+                      {Math.round(img.width)}×{Math.round(img.height)}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => handleDeleteImage(e, img.id)}
+                    title="Delete image"
+                    className="p-0.5 hover:text-red-500"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
+
+              {/* Bottom-Right Corner Resize Handle */}
+              {canInteractWithImage && (
+                <button
+                  type="button"
+                  onPointerDown={(e) => startResizingImage(e, img)}
+                  title="Drag to resize image"
+                  className={`absolute -bottom-2 -right-2 w-5 h-5 rounded-full bg-indigo-600 text-white shadow-md flex items-center justify-center cursor-nwse-resize transition-opacity ${
+                    isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                  }`}
+                >
+                  <Maximize2 size={11} className="rotate-90" />
+                </button>
+              )}
+            </div>
+          );
+        })}
 
         {/* Floating Positioned Text Boxes */}
         {textBoxes.map((box) => {
