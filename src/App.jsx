@@ -557,16 +557,33 @@ export default function App() {
             height,
           };
 
-          handleUpdateActivePage({
-            ...activePage,
-            images: [...(activePage.images || []), newImage],
-          });
+          // Resolve the destination by stable IDs when the async image load finishes.
+          // This merges simultaneous uploads and avoids inserting into a page the user left.
+          setFolders((prev) =>
+            prev.map((folder) =>
+              folder.id !== activeFolderId
+                ? folder
+                : {
+                    ...folder,
+                    notebooks: folder.notebooks.map((notebook) => {
+                      if (notebook.id !== activeNotebook?.id) return notebook;
+                      const normalized = normalizeNotebook(notebook);
+                      const pages = normalized.pages.map((page) =>
+                        page.id === activePage.id
+                          ? { ...page, images: [...(page.images || []), newImage] }
+                          : page
+                      );
+                      return { ...normalized, pages, updatedAt: Date.now() };
+                    }),
+                  }
+            )
+          );
         };
         imgEl.src = dataUrl;
       };
       reader.readAsDataURL(file);
     },
-    [activePage, handleUpdateActivePage]
+    [activePage, activeFolderId, activeNotebook?.id]
   );
 
   const handleImageInputChange = (e) => {
